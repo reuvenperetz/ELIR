@@ -41,7 +41,7 @@ class Elir(nn.Module):
 
     def load_weights(self, path):
         if path:
-            state_dict = torch.load(path, map_location="cuda")
+            state_dict = torch.load(path, map_location="cpu")
             if path.endswith(".ckpt"):
                 sd_fmir = state_dict["state_dict_fmir"]
                 self.fmir.load_state_dict(sd_fmir)

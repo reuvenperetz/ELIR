@@ -17,15 +17,20 @@ def set_seed(seed):
 
 
 def get_device():
-    return torch.device(torch.cuda.current_device() if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 def set_train(model):
-    device = "cuda" if torch.cuda.is_available() else 'cpu'
+    device = get_device()
     model.to(device)
     model.train()
 
 def set_eval(model):
-    device = "cuda" if torch.cuda.is_available() else 'cpu'
+    device = get_device()
     model.to(device)
     model.eval()
 

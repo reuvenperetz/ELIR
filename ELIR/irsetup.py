@@ -25,12 +25,17 @@ class IRSetup(L.LightningModule):
         self.scheduler = scheduler
         self.metrics = eval_cfg.get("metrics",[])
         self.tmodel = tmodel
-        self.cuda_device = torch.device(torch.cuda.current_device())
-        self.metric_evals = [MetricEval(metric, self.cuda_device, run_dir) for metric in self.metrics]
+        if torch.cuda.is_available():
+            self.acc_device = torch.device(torch.cuda.current_device())
+        elif torch.backends.mps.is_available():
+            self.acc_device = torch.device('mps')
+        else:
+            self.acc_device = torch.device('cpu')
+        self.metric_evals = [MetricEval(metric, self.acc_device, run_dir) for metric in self.metrics]
         self.train_loss = []
         self.ema = None
         if ema_decay:
-            self.ema = ModelEMA(model, device=self.cuda_device, decay=ema_decay)
+            self.ema = ModelEMA(model, device=self.acc_device, decay=ema_decay)
         self.samples_dir = None
         if run_dir and save_images:
             self.samples_dir = os.path.join(run_dir, "samples")

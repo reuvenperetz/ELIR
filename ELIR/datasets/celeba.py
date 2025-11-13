@@ -11,8 +11,8 @@ class CelebADataset(Dataset):
     def __init__(self, image_folder, task, patch_size):
         super(CelebADataset, self).__init__()
         self.task = task
-        self.lq_images_path = self.get_file_path(image_folder, "lq")
-        self.hq_images_path = self.get_file_path(image_folder, "hq")
+        self.lq_images_path = self.get_file_path(image_folder, "celeba_512_validation_lq")
+        self.hq_images_path = self.get_file_path(image_folder, "celeba_512_validation")
         self.transform_LQ, self.transform_HQ = self.preprocess(task, patch_size)
 
     def preprocess(self, task, patch_size):
@@ -90,7 +90,7 @@ class CelebA(BasicLoader):
         task = dataset_params.get("task", "bfr")
 
         # Datasets
-        dataset = CelebADataset(os.path.join(path, "test"), task, patch_size)
+        dataset = CelebADataset(path, task, patch_size)
 
         # Loaders
         loader = DataLoader(dataset,

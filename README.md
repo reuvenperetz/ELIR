@@ -1,5 +1,5 @@
 
-# Efficient Image Restoration via Latent Consistency Flow Matching
+# Efficient Image Restoration via Latent Consistency Flow Matching (BMVC 2025)
 
 ## 📄 Paper 
 https://arxiv.org/abs/2502.03500
@@ -53,6 +53,7 @@ ImageNet-1K contains 1.2M general-contnet images at different shapes.
 ### CelebA, LFW
 Synthesised and in-the-wild face images.
   * Download: https://xinntao.github.io/projects/gfpgan
+  * Put 'celeba_512_validation_lq' and 'celeba_512_validation' folders in the same 'celeba' folder
 
 ### ImageNet-Validation, RealSet80
 Synthesised and real-world imges.
