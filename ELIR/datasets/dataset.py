@@ -26,6 +26,9 @@ def get_loader(ds_params):
     elif ds_name == "Imagenet256":
         from ELIR.datasets.imagenet256 import Imagenet256
         dl = Imagenet256().create_loaders(ds_params)
+    elif ds_name == "QRISP":
+        from ELIR.datasets.qrisp import QRISP
+        dl = QRISP().create_loaders(ds_params)
     else:
         raise Exception("Dataset is unknown!")
 
