@@ -5,13 +5,16 @@ import os
 import glob
 from PIL import Image
 import torch.nn.functional as F
+from torch.utils.data import Dataset
+import torch
+
 
 
 class QRISPDataset(Dataset):
     def __init__(self, image_folder, patch_size):
         super(QRISPDataset, self).__init__()
-        self.hq_images_path = self.get_file_paths(image_folder, "1080p/Native/0000")
-        self.lq_images_path = self.get_file_paths(image_folder, "540p/Native/0000")
+        self.hq_images_path = self.get_file_paths(image_folder, "hq")
+        self.lq_images_path = self.get_file_paths(image_folder, "lq")
 
         assert len(self.lq_images_path) == len(self.hq_images_path), \
             "Mismatch between LQ and GT image counts"
@@ -33,34 +36,75 @@ class QRISPDataset(Dataset):
         return transform, transform
 
     def __getitem__(self, index):
-        # LQ
-        lq_path = self.lq_images_path[index]
-        lq_img = Image.open(lq_path).convert("RGB")
-        img_LQ = self.transform_LQ(lq_img)
+        # Load Images
+        lq_img = Image.open(self.lq_images_path[index]).convert("RGB")
+        hq_img = Image.open(self.hq_images_path[index]).convert("RGB")
 
-        # HQ
-        hq_path = self.hq_images_path[index]
-        hq_img = Image.open(hq_path).convert("RGB")
+        img_LQ = self.transform_LQ(lq_img).unsqueeze(0) # (1, C, H, W)
         img_HQ = self.transform_HQ(hq_img)
 
-        x = img_LQ[:, 0:512, 0:512]
+        # Interpolate LQ to HQ size
+        img_LQ = F.interpolate(img_LQ, size=(1080, 1920), mode="bicubic").squeeze(0)
 
-        # x: (3, 512, 512)
-        x = x.unsqueeze(0)  # -> (1, 3, 512, 512)
+        # Define 4 corner coordinates (y, x) for 1024x1024 patches
+        coords = [
+            (0, 0),                    # Top-Left
+            (0, 1920 - 1024),          # Top-Right
+            (1080 - 1024, 0),          # Bottom-Left
+            (1080 - 1024, 1920 - 1024) # Bottom-Right
+        ]
 
-        x_up = F.interpolate(
-            x,
-            size=(1024, 1024),
-            mode="bicubic",
-            align_corners=False
-        )
+        patches_LQ = []
+        patches_HQ = []
 
-        img_LQ = x_up.squeeze(0)  # -> (3, 1024, 1024)
+        for y, x in coords:
+            patches_LQ.append(img_LQ[:, y:y+1024, x:x+1024])
+            patches_HQ.append(img_HQ[:, y:y+1024, x:x+1024])
 
-        img_HQ = img_HQ[:, 0:1024, 0:1024]
+        # Return as (4, C, 1024, 1024)
+        return torch.stack(patches_LQ), torch.stack(patches_HQ)
 
-        return img_LQ, img_HQ
 
+
+
+def collate_patches(batch):
+    # batch is [(patches_x, patches_y), ...]
+    x, y = zip(*batch)
+    # Stack everything into (BatchSize * 4, C, 1024, 1024)
+    return torch.cat(x, dim=0), torch.cat(y, dim=0)
+
+
+import matplotlib.pyplot as plt
+
+def visualize_patches(x_tuple, y_tuple):
+    # Extract tensors from tuples
+    # Assuming x_tuple = (tensor,) and y_tuple = (tensor,)
+    batch_x = x_tuple[0]
+    batch_y = y_tuple[0]
+
+    num_patches = batch_x.shape[0] # 4
+    fig, axes = plt.subplots(num_patches, 2, figsize=(10, 5 * num_patches))
+
+    for i in range(num_patches):
+        # Convert (C, H, W) to (H, W, C) for plotting and move to CPU
+        img_x = batch_x[i].permute(1, 2, 0).cpu().detach().numpy()
+        img_y = batch_y[i].permute(1, 2, 0).cpu().detach().numpy()
+
+        # Plot X (Low Res / Input)
+        axes[i, 0].imshow(img_x)
+        axes[i, 0].set_title(f"Patch {i+1}: Input (X)")
+        axes[i, 0].axis('off')
+
+        # Plot Y (High Res / Target)
+        axes[i, 1].imshow(img_y)
+        axes[i, 1].set_title(f"Patch {i+1}: Target (Y)")
+        axes[i, 1].axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+# Usage:
+# visualize_patches(out_x, out_y)
 
 class QRISP(BasicLoader):
     def __init__(self):
@@ -68,7 +112,7 @@ class QRISP(BasicLoader):
 
     def create_loaders(self, dataset_params):
         path = dataset_params.get("path")
-        batch_size = dataset_params.get("batch_size", 32)
+        batch_size = dataset_params.get("batch_size", 8) # Note: Effective batch will be batch_size * 4
         num_workers = dataset_params.get("num_workers", 4)
         patch_size = dataset_params.get("patch_size", 64)
 
@@ -80,7 +124,8 @@ class QRISP(BasicLoader):
             shuffle=False,
             num_workers=num_workers,
             pin_memory=True,
-            drop_last=False
+            drop_last=False,
+            collate_fn=collate_patches
         )
 
         return loader
