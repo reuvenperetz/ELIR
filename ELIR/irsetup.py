@@ -12,6 +12,31 @@ import torch.nn.functional as F
 from ELIR.utils import ImageSpliterTh
 import math
 
+import torch
+from torchvision.utils import make_grid
+from PIL import Image
+
+def save_lq_pred_gt_triplets(x_lq, y_pred, y_gt, out_path="lq_pred_downandupgt.png"):
+    """
+    x_lq   : (N, 3, H, W) low-quality inputs
+    y_pred : (N, 3, H, W) produced / model output
+    y_gt   : (N, 3, H, W) ground-truth high-quality
+    """
+
+    assert x_lq.shape == y_pred.shape == y_gt.shape, \
+        "All tensors must have the same shape"
+
+    # Interleave: [LQ0, Pred0, GT0, LQ1, Pred1, GT1, ...]
+    triplets = torch.stack(
+        [img for trio in zip(x_lq, y_pred, y_gt) for img in trio]
+    )
+
+    # 3 columns: LQ | Pred | GT
+    grid = make_grid(triplets, nrow=3, normalize=True)
+
+    img = (grid.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8")
+    Image.fromarray(img).save(out_path)
+
 
 
 class IRSetup(L.LightningModule):
@@ -41,6 +66,8 @@ class IRSetup(L.LightningModule):
             self.samples_dir = os.path.join(run_dir, "samples")
             os.makedirs(self.samples_dir, exist_ok=True)  # run folder
             self.samples = []
+        self.images_to_save = [0,100,700,1000,1200,1400, 1450]
+        self.current_image=0
 
     def optimizer_step(
         self,
@@ -81,6 +108,7 @@ class IRSetup(L.LightningModule):
         x_lq, y = batch
         chop = self.eval_cfg.get("chop", None)
         if chop:
+            raise NotImplementedError("Chop inference is not implemented yet.")
             sf = chop.get("sf", 4)
             upscale = chop.get("upscale", 4)
             chop_size = chop.get("chop_size", 256)
@@ -104,12 +132,28 @@ class IRSetup(L.LightningModule):
         else:
             y_hat = self.infer(x_lq)
 
+        lq_final, pred_final, gt_final = rebuild_and_crop_simple(
+            lq_p=x_lq,
+            pred_p=y_hat,
+            gt_p=y,
+            original_hw=(270, 480),  # Original LR dimensions
+            p_res=256,
+            scale=4
+        )
+        lq_final, pred_final, gt_final = lq_final.unsqueeze(0), pred_final.unsqueeze(0), gt_final.unsqueeze(0)
+        if self.current_image in self.images_to_save:
+            save_lq_pred_gt_triplets(x_lq.cpu(), y_hat.cpu(), y.cpu(), out_path=os.path.join(f"val_image_{self.current_image}_bsr_x4_p256.png"))
+            save_lq_pred_gt_triplets(lq_final.cpu(), pred_final.cpu(), gt_final.cpu(),
+                                     out_path=os.path.join(f"val_image_{self.current_image}_bsr_x4_p256_reassemble.png"))
+
+        self.current_image += 1
+
         if self.current_epoch > 0 and batch_idx < 2 and self.samples_dir and torch.cuda.current_device()==0:
             self.samples.append(y_hat[:2,...]) # save 2 images
             if len(self.samples) == 2: # save 2 batches
                 self.save_samples(self.current_epoch)
                 self.samples.clear()
-        self.compute_metrics(y_hat, y)
+        self.compute_metrics(pred_final, gt_final)
 
     def on_validation_epoch_end(self):
         self.log('global_step', self.global_step)
@@ -143,3 +187,41 @@ class IRSetup(L.LightningModule):
         if self.scheduler is None:
             return [self.optimizer]
         return [self.optimizer], [self.scheduler]
+
+
+import torch
+
+
+def rebuild_and_crop_simple(lq_p, pred_p, gt_p, original_hw, p_res=256, scale=4):
+    """
+    p_res: The resolution of the patches in the tensors (256)
+    original_hw: The H, W of the image BEFORE any padding/upscaling
+    """
+    H, W = original_hw
+
+    # Calculate grid size based on the 256x256 patches
+    # (Since LQ was 64, H_padded/64 is the same as (H_padded*4)/256)
+    num_h = (H * scale + (p_res - (H * scale) % p_res) % p_res) // p_res
+    num_w = (W * scale + (p_res - (W * scale) % p_res) % p_res) // p_res
+
+    def assemble(patches):
+        N, C, _, _ = patches.shape
+        # 1. Arrange into grid: (Rows, Cols, C, 256, 256)
+        img = patches.view(num_h, num_w, C, p_res, p_res)
+        # 2. Weave: (C, Rows, 256, Cols, 256)
+        img = img.permute(2, 0, 3, 1, 4).contiguous()
+        # 3. Flatten to full image: (C, H_padded, W_padded)
+        return img.view(C, num_h * p_res, num_w * p_res)
+
+    # Reconstruct
+    lq_img = assemble(lq_p)
+    pred_img = assemble(pred_p)
+    gt_img = assemble(gt_p)
+
+    # Crop to original size (scaled)
+    h_target, w_target = H * scale, W * scale
+    return (
+        lq_img[:, :h_target, :w_target],
+        pred_img[:, :h_target, :w_target],
+        gt_img[:, :h_target, :w_target]
+    )

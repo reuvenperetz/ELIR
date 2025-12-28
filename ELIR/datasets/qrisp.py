@@ -15,6 +15,7 @@ class QRISPDataset(Dataset):
         super(QRISPDataset, self).__init__()
         self.hq_images_path = self.get_file_paths(image_folder, "hq")
         self.lq_images_path = self.get_file_paths(image_folder, "lq")
+        self.patch_size = patch_size
 
         assert len(self.lq_images_path) == len(self.hq_images_path), \
             "Mismatch between LQ and GT image counts"
@@ -29,41 +30,59 @@ class QRISPDataset(Dataset):
         return len(self.hq_images_path)
 
     def preprocess(self, patch_size):
-        print(f"Warning: Ignoring patch size")
-        transform = v2.Compose([
-            v2.ToTensor()
-        ])
-        return transform, transform
+        transform_LQ = v2.Compose([
+            v2.Resize((1080, 1920), interpolation=v2.InterpolationMode.BICUBIC),
+            v2.ToTensor()])
+        transform_HQ = v2.Compose([
+            v2.ToTensor()])
+        return transform_LQ, transform_HQ
+
+    def pad_to_multiple(self, img, p):
+        """
+        img: Tensor (C, H, W)
+        Pads H and W so they are divisible by p using reflection padding
+        """
+        _, H, W = img.shape
+        pad_h = (p - H % p) % p
+        pad_w = (p - W % p) % p
+
+        # Pad format: (left, right, top, bottom)
+        img = F.pad(img, (0, pad_w, 0, pad_h), mode="reflect")
+        return img
+
+    def extract_patches(self, img, p):
+        """
+        img: Tensor (C, H, W)
+        returns: Tensor (N, C, p, p)
+        """
+        C, H, W = img.shape
+        patches = (
+            img.unfold(1, p, p)  # (C, H/p, W, p)
+               .unfold(2, p, p)  # (C, H/p, W/p, p, p)
+               .permute(1, 2, 0, 3, 4)  # (H/p, W/p, C, p, p)
+               .contiguous()
+               .view(-1, C, p, p)  # (N, C, p, p)
+        )
+        return patches
 
     def __getitem__(self, index):
-        # Load Images
+        # Load images
         lq_img = Image.open(self.lq_images_path[index]).convert("RGB")
         hq_img = Image.open(self.hq_images_path[index]).convert("RGB")
 
-        img_LQ = self.transform_LQ(lq_img).unsqueeze(0) # (1, C, H, W)
+        # To tensor
+        img_LQ = self.transform_LQ(lq_img)  # (C, H, W)
         img_HQ = self.transform_HQ(hq_img)
 
-        # Interpolate LQ to HQ size
-        img_LQ = F.interpolate(img_LQ, size=(1080, 1920), mode="bicubic").squeeze(0)
+        # Pad to be divisible by patch size
+        img_LQ = self.pad_to_multiple(img_LQ, self.patch_size)
+        img_HQ = self.pad_to_multiple(img_HQ, self.patch_size)
 
-        # Define 4 corner coordinates (y, x) for 1024x1024 patches
-        coords = [
-            (0, 0),                    # Top-Left
-            (0, 1920 - 1024),          # Top-Right
-            (1080 - 1024, 0),          # Bottom-Left
-            (1080 - 1024, 1920 - 1024) # Bottom-Right
-        ]
+        # Extract patches
+        patches_LQ = self.extract_patches(img_LQ, self.patch_size)
+        patches_HQ = self.extract_patches(img_HQ, self.patch_size)
 
-        patches_LQ = []
-        patches_HQ = []
-
-        for y, x in coords:
-            patches_LQ.append(img_LQ[:, y:y+1024, x:x+1024])
-            patches_HQ.append(img_HQ[:, y:y+1024, x:x+1024])
-
-        # Return as (4, C, 1024, 1024)
-        return torch.stack(patches_LQ), torch.stack(patches_HQ)
-
+        return patches_LQ, patches_HQ
 
 
 
@@ -114,7 +133,7 @@ class QRISP(BasicLoader):
         path = dataset_params.get("path")
         batch_size = dataset_params.get("batch_size", 8) # Note: Effective batch will be batch_size * 4
         num_workers = dataset_params.get("num_workers", 4)
-        patch_size = dataset_params.get("patch_size", 64)
+        patch_size = dataset_params.get("patch_size", 256)
 
         dataset = QRISPDataset(path, patch_size)
 
