@@ -44,4 +44,4 @@ eval_cfg:
   image_size: 256
   in_folder: /path/to/samples
   out_folder: /path/to/samples
-  chop: {sf: 4, chop_size: 512, chop_stride: 448, upscale: 4}
+  #chop: {sf: 4, chop_size: 512, chop_stride: 448, upscale: 4} # chop for realset80

@@ -20,12 +20,18 @@ def get_loader(ds_params):
     elif ds_name == "WebPhoto":
         from ELIR.datasets.webphoto import WebPhoto
         dl = WebPhoto().create_loaders(ds_params)
+    elif ds_name == "LFW":
+        from ELIR.datasets.lfw import LFW
+        dl = LFW().create_loaders(ds_params)
     elif ds_name == "Imagenet":
         from ELIR.datasets.imagenet import Imagenet
         dl = Imagenet().create_loaders(ds_params)
     elif ds_name == "Imagenet256":
         from ELIR.datasets.imagenet256 import Imagenet256
         dl = Imagenet256().create_loaders(ds_params)
+    elif ds_name == "RealSet80":
+        from ELIR.datasets.realset80 import RealSet80
+        dl = RealSet80().create_loaders(ds_params)
     else:
         raise Exception("Dataset is unknown!")
 
