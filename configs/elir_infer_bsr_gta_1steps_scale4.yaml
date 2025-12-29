@@ -48,4 +48,6 @@ eval_cfg:
   orig_lq_res: [270, 480]
   scale_factor: 4
   input_patch_size: 256
+  saved_images_name: 'bsr_gta_1steps_x4_p256'
+
   #chop: {sf: 4, chop_size: 256, chop_stride: 448, upscale: 4}

@@ -142,9 +142,9 @@ class IRSetup(L.LightningModule):
         )
         lq_final, pred_final, gt_final = lq_final.unsqueeze(0), pred_final.unsqueeze(0), gt_final.unsqueeze(0)
         if self.current_image in self.images_to_save:
-            save_lq_pred_gt_triplets(x_lq.cpu(), y_hat.cpu(), y.cpu(), out_path=os.path.join(f"val_image_{self.current_image}_bsr_3steps_x4_p256.png"))
+            save_lq_pred_gt_triplets(x_lq.cpu(), y_hat.cpu(), y.cpu(), out_path=os.path.join(f"val_image_{self.current_image}_{self.eval_cfg.get('saved_images_name')}.png"))
             save_lq_pred_gt_triplets(lq_final.cpu(), pred_final.cpu(), gt_final.cpu(),
-                                     out_path=os.path.join(f"val_image_{self.current_image}_bsr_3steps_x4_p256_reassemble.png"))
+                                     out_path=os.path.join(f"val_image_{self.current_image}_{self.eval_cfg.get('saved_images_name')}_reassemble.png"))
 
         self.current_image += 1
 
@@ -153,7 +153,7 @@ class IRSetup(L.LightningModule):
             if len(self.samples) == 2: # save 2 batches
                 self.save_samples(self.current_epoch)
                 self.samples.clear()
-        self.compute_metrics(pred_final, gt_final)
+        self.compute_metrics(y_hat, y)
 
     def on_validation_epoch_end(self):
         self.log('global_step', self.global_step)
