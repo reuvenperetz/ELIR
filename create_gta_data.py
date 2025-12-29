@@ -34,6 +34,12 @@ def block_average_downsample(img, factor):
 def process_scale(dst_root, factor):
     print(f"Creating x{factor} dataset")
 
+    # Flat output dirs
+    hq_dir = dst_root / "hq"
+    lq_dir = dst_root / "lq"
+    hq_dir.mkdir(parents=True, exist_ok=True)
+    lq_dir.mkdir(parents=True, exist_ok=True)
+
     for scene_dir in sorted(SRC_ROOT.iterdir()):
         if not scene_dir.is_dir():
             continue
@@ -41,20 +47,18 @@ def process_scale(dst_root, factor):
         scene = scene_dir.name
         print(f"  Scene {scene}")
 
-        hq_dir = dst_root / scene / "hq"
-        lq_dir = dst_root / scene / "lq"
-        hq_dir.mkdir(parents=True, exist_ok=True)
-        lq_dir.mkdir(parents=True, exist_ok=True)
-
         for img_path in sorted(scene_dir.glob("*.png")):
             img = Image.open(img_path).convert("RGB")
 
+            # Build flattened name: scene_frame.png
+            out_name = f"{scene}_{img_path.name}"
+
             # HQ: original
-            img.save(hq_dir / img_path.name)
+            img.save(hq_dir / out_name)
 
             # LQ: block-averaged downsample
             lq = block_average_downsample(img, factor)
-            lq.save(lq_dir / img_path.name)
+            lq.save(lq_dir / out_name)
 
 
 if __name__ == "__main__":

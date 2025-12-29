@@ -12,7 +12,7 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  val_dataset: {name: QRISP, path: QRISP_FLAT_270_TO_1080, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
+  val_dataset: {name: QRISP, path: /tmp/qrisp/QRISP_270p_Native_TO_1080p_Native/SpaceShipDemo, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
   #val_dataset: {name: RealSet80, path: /local_datasets/RealSet80, task: bsr, batch_size: 1, num_workers: 16}
 
 # -------------------------------------------------
@@ -21,7 +21,7 @@ dataset_cfg:
 model_cfg:
   arch_cfg: {name: elir,
              path: elir_bsr.pth,
-             params: { fm_cfg: {k_steps: 1, sigma_s: 0.04, latent_shape: [16,32,32]},
+             params: { fm_cfg: {k_steps: 2, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
                                              t_emb_dim: 160, use_rescale_conv: True, overparametrization: False },
@@ -40,7 +40,7 @@ model_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["psnr", "ssim", "lpips", "fid-f", "niqe", "clipiqa", "musiq"]
+  metrics: ["psnr", "ssim", "lpips", "niqe", "clipiqa", "musiq", "fid-f"]
   #metrics: ["niqe","clipiqa"]
   image_size: 256
   in_folder: /path/to/samples
