@@ -17,7 +17,7 @@ def pos_emb(t, t_dim, scale=1000):
 
 
 class Elir(nn.Module):
-    def __init__(self, fm_cfg, fmir_cfg, mmse_cfg, enc_cfg, dec_cfg):
+    def __init__(self, fm_cfg, fmir_cfg, mmse_cfg, enc_cfg, dec_cfg, only_interpolate):
         super(Elir, self).__init__()
         self.fmir_cfg = fmir_cfg
         self.mmse_cfg = mmse_cfg
@@ -34,6 +34,7 @@ class Elir(nn.Module):
         self.enc = get_model(enc_cfg)
         self.dec = get_model(dec_cfg)
         self.noise = self.sigma_s * torch.randn((1, *self.latent_shape))
+        self.only_interpolate = only_interpolate
 
     def collapse(self):
         self.fmir.collapse()
@@ -56,6 +57,9 @@ class Elir(nn.Module):
                 self.load_state_dict(state_dict)
 
     def forward(self, x):
+        if self.only_interpolate:
+            return x
+
         self.to(x.device)
         z = self.enc(x)
         if self.dynamic_noise:

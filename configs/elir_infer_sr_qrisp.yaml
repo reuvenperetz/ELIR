@@ -12,7 +12,7 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  val_dataset: {name: QRISP, path: /tmp/qrisp/QRISP_FLAT_270_TO_1080, task: sr, batch_size: 1, patch_size: 256, num_workers: 16}
+  val_dataset: {name: QRISP, path: QRISP_FLAT_270_TO_1080, task: sr, batch_size: 1, patch_size: 256, num_workers: 16}
 
 
 # -------------------------------------------------
@@ -21,7 +21,7 @@ dataset_cfg:
 model_cfg:
   arch_cfg: {name: elir,
              path: elir_sr.pth,
-             params: { fm_cfg: {k_steps: 3, sigma_s: 0.1, latent_shape: [16,32,32], seed: 2025},
+             params: { fm_cfg: {k_steps: 1, sigma_s: 0.1, latent_shape: [16,32,32], seed: 2025},
                       fmir_cfg: {name: lunet,
                                 params: {ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 128, out_channels: 16,
                                          t_emb_dim: 160, overparametrization: False},
@@ -38,7 +38,7 @@ model_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["psnr", "lpips", "ssim", "musiq","clipiqa", "niqe"]
+  metrics: ["psnr"]
   #metrics: ["fid-f","niqe","musiq","clipiqa"]
   image_size: 1024
   in_folder: /path/to/samples

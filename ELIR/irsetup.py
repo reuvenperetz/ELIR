@@ -16,7 +16,7 @@ import torch
 from torchvision.utils import make_grid
 from PIL import Image
 
-def save_lq_pred_gt_triplets(x_lq, y_pred, y_gt, out_path="lq_pred_downandupgt.png"):
+def save_lq_pred_gt_triplets(x_lq, y_pred, y_gt, out_path="lq_pred_hq.png"):
     """
     x_lq   : (N, 3, H, W) low-quality inputs
     y_pred : (N, 3, H, W) produced / model output
@@ -66,7 +66,7 @@ class IRSetup(L.LightningModule):
             self.samples_dir = os.path.join(run_dir, "samples")
             os.makedirs(self.samples_dir, exist_ok=True)  # run folder
             self.samples = []
-        self.images_to_save = [0,100,700,1000,1200,1400, 1450]
+        self.images_to_save = [0,20,40, 60]
         self.current_image=0
 
     def optimizer_step(
@@ -136,15 +136,15 @@ class IRSetup(L.LightningModule):
             lq_p=x_lq,
             pred_p=y_hat,
             gt_p=y,
-            original_hw=(270, 480),  # Original LR dimensions
-            p_res=256,
-            scale=4
+            original_hw=self.eval_cfg.get("orig_lq_res", None),  # Original LR dimensions
+            p_res=self.eval_cfg.get("input_patch_size", None),
+            scale=self.eval_cfg.get("scale_factor", None)
         )
         lq_final, pred_final, gt_final = lq_final.unsqueeze(0), pred_final.unsqueeze(0), gt_final.unsqueeze(0)
         if self.current_image in self.images_to_save:
-            save_lq_pred_gt_triplets(x_lq.cpu(), y_hat.cpu(), y.cpu(), out_path=os.path.join(f"val_image_{self.current_image}_bsr_x4_p256.png"))
+            save_lq_pred_gt_triplets(x_lq.cpu(), y_hat.cpu(), y.cpu(), out_path=os.path.join(f"val_image_{self.current_image}_bsr_3steps_x4_p256.png"))
             save_lq_pred_gt_triplets(lq_final.cpu(), pred_final.cpu(), gt_final.cpu(),
-                                     out_path=os.path.join(f"val_image_{self.current_image}_bsr_x4_p256_reassemble.png"))
+                                     out_path=os.path.join(f"val_image_{self.current_image}_bsr_3steps_x4_p256_reassemble.png"))
 
         self.current_image += 1
 
