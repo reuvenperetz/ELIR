@@ -19,6 +19,20 @@ class MetricEval(object):
             self.evaluater = FrechetInceptionDistance(normalize=True, reset_real_features=False)
             load_fid_statistics(os.path.join(os.path.dirname(__file__),"datasets","celeba_fid_stat.pt"), self.evaluater, device)
             self.evaluater.to(device)
+
+        elif metric == "fid":
+            # FID using pyiqa: pred vs gt directories
+            self.out_dir = "out" if out_dir is None else os.path.join(out_dir, "out")
+
+            self.pred_dir = os.path.join(self.out_dir, "pred")
+            self.gt_dir = os.path.join(self.out_dir, "gt")
+
+            shutil.rmtree(self.out_dir, ignore_errors=True)
+            os.makedirs(self.pred_dir, exist_ok=True)
+            os.makedirs(self.gt_dir, exist_ok=True)
+
+            self.evaluater = pyiqa.create_metric('fid', device=device)
+
         elif metric == "fid-f":
             # FID vs FFHQ dataset
             self.out_dir = "out" if out_dir is None else os.path.join(self.out_dir,"out")
@@ -42,6 +56,13 @@ class MetricEval(object):
             self.evaluater.update(x_hq_hat, real=False)
             value = torch.zeros((len(x_hq_hat),))
             self.count += bs
+        elif self.metric=="fid":
+            self.image_size = x_hq.shape[-1]
+            for img, gt in zip(x_hq_hat, x_hq):
+                save_image(gt, os.path.join(self.gt_dir, str(self.count)+".png"))
+                save_image(img, os.path.join(self.pred_dir, str(self.count)+".png"))
+                self.count += 1
+            value = torch.zeros((len(x_hq_hat),))
         elif self.metric=="fid-f":
             self.image_size = x_hq.shape[-1]
             for img in x_hq_hat:
@@ -66,6 +87,14 @@ class MetricEval(object):
         if self.metric=="fid-g":
             final_value = self.evaluater.compute()
             self.evaluater.reset()
+
+        elif self.metric=="fid":
+            final_value = self.evaluater(self.pred_dir,
+                                         self.gt_dir,
+                                         dataset_res=self.image_size)
+            shutil.rmtree(self.out_dir, ignore_errors=True)
+            os.makedirs(self.out_dir, exist_ok=True)
+
         elif self.metric=="fid-f":
             final_value = self.evaluater(self.out_dir,
                                          dataset_name="FFHQ",
