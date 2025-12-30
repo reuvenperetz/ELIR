@@ -8,10 +8,8 @@ SRC_ROOT="QRISP/TestSet"
 LQ_RES="270p"
 HQ_RES="1080p"
 
-LQ_TYPE="Native"      # Native | MipBias | Jittered
-HQ_TYPE="Native"    # Native | Enhanced
-
-MIP_BIAS="Minus2"     # Minus1 | Minus1.58 | Minus2 (only for MipBias)
+LQ_TYPE="Native"      # Native | MipBiasMinusX | MipBiasMinusXJittered
+HQ_TYPE="Native"      # Native | Enhanced
 
 # ================= ARGUMENT PARSING =================
 
@@ -22,9 +20,8 @@ usage() {
     echo "Options:"
     echo "  --lq-res <270p|370p|540p>"
     echo "  --hq-res <1080p>"
-    echo "  --lq-type <Native|MipBias|Jittered>"
+    echo "  --lq-type <Native|MipBiasMinusX|MipBiasMinusXJittered>"
     echo "  --hq-type <Native|Enhanced>"
-    echo "  --mip-bias <Minus1|Minus1.58|Minus2>"
     echo
     exit 1
 }
@@ -35,7 +32,6 @@ while [[ $# -gt 0 ]]; do
         --hq-res)   HQ_RES="$2"; shift 2 ;;
         --lq-type)  LQ_TYPE="$2"; shift 2 ;;
         --hq-type)  HQ_TYPE="$2"; shift 2 ;;
-        --mip-bias) MIP_BIAS="$2"; shift 2 ;;
         -h|--help)  usage ;;
         *)
             echo "Unknown option: $1"
@@ -43,6 +39,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# ================= MIP BIAS DERIVATION =================
+
+case "${LQ_RES}" in
+    270p) MIP_BIAS="Minus2" ;;
+    370p) MIP_BIAS="Minus1.58" ;;
+    540p) MIP_BIAS="Minus1" ;;
+    *)
+        echo "Invalid LQ_RES: ${LQ_RES}"
+        exit 1
+        ;;
+esac
 
 # ================= PATH MAPPING =================
 
@@ -52,13 +60,13 @@ case "${LQ_TYPE}" in
         LQ_SUBDIR="Native"
         LQ_TAG="Native"
         ;;
-    Jittered)
-        LQ_SUBDIR="Jittered"
-        LQ_TAG="Jittered"
-        ;;
-    MipBias)
+    MipBiasMinusX)
         LQ_SUBDIR="MipBias${MIP_BIAS}"
         LQ_TAG="MipBias_${MIP_BIAS}"
+        ;;
+    MipBiasMinusXJittered)
+        LQ_SUBDIR="MipBias${MIP_BIAS}Jittered"
+        LQ_TAG="MipBias_${MIP_BIAS}_Jittered"
         ;;
     *)
         echo "Invalid LQ_TYPE: ${LQ_TYPE}"
