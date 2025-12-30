@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 # Load the 4-channel image
-depth_png = cv2.imread('QRISP/TestSet/AbandonedSchool/540p/DepthMipBiasMinus1/0000/0040.png', cv2.IMREAD_UNCHANGED) # (270, 480, 4)
+depth_png = cv2.imread('QRISP/ScifiBaseStartStop/270p/DepthMipBiasMinus2/0005/0014.png', cv2.IMREAD_UNCHANGED) # (270, 480, 4)
 # 2. Convert to float32 for high-precision math
 d = depth_png.astype(np.float32)
 
@@ -14,8 +14,15 @@ depth_final = (d[:,:,2] / 255.0 +
                d[:,:,0] / (255.0**3) +
                d[:,:,3] / (255.0**4))
 
-# 4. Clean up the view (Remove "Inf" and Normalize)
-depth_vis = cv2.normalize(depth_final, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+# 1. Inverse as you did
+depth_inv = 1.0 - depth_final
 
-cv2.imshow('Silky Smooth Depth', depth_vis)
+# 2. Apply a power (e.g., 5.0 or 10.0) to "push" mid-tones down
+# This makes far things stay black longer and brings out close details
+depth_contrasted = np.power(depth_inv, 20.0)
+
+# 3. Clip to be safe and show
+depth_vis = np.clip(depth_contrasted * 255, 0, 255).astype('uint8')
+cv2.imshow('Better Contrast', depth_vis)
+
 cv2.waitKey(0)
