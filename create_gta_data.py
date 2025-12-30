@@ -2,17 +2,20 @@ import os
 from pathlib import Path
 import numpy as np
 from PIL import Image
+import argparse
+
 
 
 SRC_ROOT = Path("val/img")
 DST_X2 = Path("val_x2/img")
+DST_X3 = Path("val_x3/img")
 DST_X4 = Path("val_x4/img")
 
 
 def block_average_downsample(img, factor):
     """
     img: PIL Image (H, W, 3)
-    factor: 2 or 4
+    factor: 2, 3 or 4
     """
     arr = np.asarray(img, dtype=np.float32)
 
@@ -61,7 +64,27 @@ def process_scale(dst_root, factor):
             lq.save(lq_dir / out_name)
 
 
+
 if __name__ == "__main__":
-    process_scale(DST_X2, factor=2)
-    process_scale(DST_X4, factor=4)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--scale",
+        type=int,
+        choices=[2, 3, 4],
+        default=None,
+        help="Scale factor to process (2, 3 or 4). If not set, process all."
+    )
+    args = parser.parse_args()
+
+    if args.scale is None:
+        process_scale(DST_X2, factor=2)
+        process_scale(DST_X3, factor=3)
+        process_scale(DST_X4, factor=4)
+    elif args.scale == 2:
+        process_scale(DST_X2, factor=2)
+    elif args.scale == 3:
+        process_scale(DST_X3, factor=3)
+    elif args.scale == 4:
+        process_scale(DST_X4, factor=4)
+
     print("Done.")
