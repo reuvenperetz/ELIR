@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git curl ca-certificates \
     ffmpeg libsm6 libxext6 \
-    zip \
+    zip unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Make `python` → `python3`
