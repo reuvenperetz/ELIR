@@ -13,8 +13,8 @@ import torch
 class QRISPDataset(Dataset):
     def __init__(self, image_folder, patch_size):
         super(QRISPDataset, self).__init__()
-        self.hq_images_path = self.get_file_paths(image_folder, "hq")[0:4]
-        self.lq_images_path = self.get_file_paths(image_folder, "lq")[0:4]
+        self.hq_images_path = self.get_file_paths(image_folder, "hq")
+        self.lq_images_path = self.get_file_paths(image_folder, "lq")
         self.patch_size = patch_size
 
         assert len(self.lq_images_path) == len(self.hq_images_path), \
