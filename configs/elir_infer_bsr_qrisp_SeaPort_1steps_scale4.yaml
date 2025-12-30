@@ -12,7 +12,7 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  val_dataset: {name: QRISP, path: /tmp/qrisp/QRISP_270p_Native_TO_1080p_Native/SeaPort, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
+  val_dataset: {name: QRISP, path: /tmp/qrisp/QRISP_270p_MipBias_Minus2_TO_1080p_Enhanced/SeaPort, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
   #val_dataset: {name: RealSet80, path: /local_datasets/RealSet80, task: bsr, batch_size: 1, num_workers: 16}
 
 # -------------------------------------------------
@@ -40,7 +40,7 @@ model_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["psnr", "ssim", "lpips", "niqe", "clipiqa", "musiq", "fid-f"]
+  metrics: ["psnr", "ssim", "lpips", "niqe", "clipiqa", "musiq", "fid"]
   #metrics: ["niqe","clipiqa"]
   image_size: 256
   in_folder: /path/to/samples
