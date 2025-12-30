@@ -12,7 +12,7 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  val_dataset: {name: QRISP, path: /tmp/val_x2/img, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
+  val_dataset: {name: QRISP, path: /tmp/val_x4/img, task: bsr, batch_size: 1, patch_size: 256, num_workers: 16}
   #val_dataset: {name: RealSet80, path: /local_datasets/RealSet80, task: bsr, batch_size: 1, num_workers: 16}
 
 # -------------------------------------------------
