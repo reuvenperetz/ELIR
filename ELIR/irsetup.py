@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from ELIR.utils import ImageSpliterTh
 import math
 
+from utils import save_patch_pairs
 
 
 class IRSetup(L.LightningModule):
@@ -57,11 +58,7 @@ class IRSetup(L.LightningModule):
         x_lq, x_hq = batch[0], batch[1]
         # Loss function
         loss = get_loss(self.model, x_hq, x_lq, self.fm_cfg, self.tmodel)
-
-        self.train_loss.append(loss)
-        if batch_idx % 5:
-            self.log("train_loss", torch.mean(torch.Tensor(self.train_loss)).item(), logger=True, prog_bar=True)
-            self.train_loss.clear()
+        self.log("train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def compute_metrics(self, x_hq_hat, x_hq):
@@ -104,11 +101,11 @@ class IRSetup(L.LightningModule):
         else:
             y_hat = self.infer(x_lq)
 
-        if self.current_epoch > 0 and batch_idx < 2 and self.samples_dir and torch.cuda.current_device()==0:
-            self.samples.append(y_hat[:2,...]) # save 2 images
-            if len(self.samples) == 2: # save 2 batches
-                self.save_samples(self.current_epoch)
-                self.samples.clear()
+        # if self.current_epoch > 0 and batch_idx < 2 and self.samples_dir and torch.cuda.current_device()==0:
+        #     self.samples.append(y_hat[:2,...]) # save 2 images
+        #     if len(self.samples) == 2: # save 2 batches
+        #         self.save_samples(self.current_epoch)
+        #         self.samples.clear()
         self.compute_metrics(y_hat, y)
 
     def on_validation_epoch_end(self):

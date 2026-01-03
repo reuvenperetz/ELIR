@@ -6,14 +6,13 @@ from ELIR.models.load_model import get_model
 from ELIR.datasets.dataset import get_loader
 from ELIR.training.tparmas import get_opt_sched
 import pytorch_lightning as L
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import MLFlowLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from ELIR.irsetup import IRSetup
 import os
 import torch
 import warnings
 warnings.filterwarnings("ignore")
-
 
 
 def run_train(conf):
@@ -66,13 +65,21 @@ def run_train(conf):
     eval_cfg = conf.get("eval_cfg")
 
     # WandB
-    wandbLogger = None
-    if train_cfg.get("wandb",False):
-        import wandb
-        print("WandB is enable!")
-        wandb.init(project=env_cfg.get("project_name"), dir=run_dir, group=run_name)
-        wandbLogger = WandbLogger(project=env_cfg.get("project_name"), dir=run_dir)
-        wandb.log(dict(**conf))
+    # wandbLogger = None
+    # if train_cfg.get("wandb",False):
+    #     import wandb
+    #     print("WandB is enable!")
+    #     wandb.init(project=env_cfg.get("project_name"), dir=run_dir, group=run_name)
+    #     wandbLogger = WandbLogger(project=env_cfg.get("project_name"), dir=run_dir)
+    #     wandb.log(dict(**conf))
+
+    mlflow_logger = None
+    if train_cfg.get("mlflow",False):
+        print("mlflow is enable!")
+        mlflow_logger = MLFlowLogger(experiment_name=env_cfg.get("project_name"),
+                                     tracking_uri=train_cfg.get("mlflow_tracking_uri", f"{out_dir}/.mlruns"),
+                                     run_name=run_name)
+        mlflow_logger.log_hyperparams(dict(**conf))
 
     # Training
     train_setup = IRSetup(model,
@@ -94,7 +101,7 @@ def run_train(conf):
                         strategy = "ddp",
                         devices = "auto",
                         accelerator="gpu",
-                        logger = wandbLogger,
+                        logger = mlflow_logger,
                         num_sanity_val_steps=train_cfg.get("num_sanity_val_steps",0),
                         check_val_every_n_epoch = train_cfg.get("check_val_every_n_epoch",1),
                         max_steps = train_cfg.get("max_steps", -1))
@@ -111,8 +118,8 @@ def run_train(conf):
     for metric in metrics:
         metric_value = results[0][metric]
         print("{}: {:0.4f}".format(metric, metric_value), end =", ")
-        if train_cfg.get("wandb", False):
-            wandb.log({"final_"+metric: metric_value})
+        if train_cfg.get("mlflow", False):
+            mlflow_logger.log_metrics({"final_"+metric:metric_value}, step=trainer.current_epoch)
 
     # ----------------------------
     # Save model
@@ -126,7 +133,8 @@ def run_train(conf):
     state_dict = train_setup.ema.model.state_dict()
     state_dict = adjust_weights(state_dict)
     torch.save(state_dict, os.path.join(run_dir, "elir.pth"))
-
+    if train_cfg.get("mlflow", False):
+        mlflow_logger.finalize("success")
 
 
 if __name__ == "__main__":

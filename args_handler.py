@@ -12,6 +12,7 @@ def argument_handler():
     parser.add_argument("--lr", type=float, help="learning rate")
     parser.add_argument("--weight_decay", type=float, help="weight decay")
     parser.add_argument("--ema_decay", type=float, help="EMA decay")
+    parser.add_argument("--mlflow_tracking_uri", type=str, help="MLflow tracking URI")
 
     args_dict = vars(parser.parse_args())
     yaml_path = args_dict.pop("yaml_path")
