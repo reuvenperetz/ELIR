@@ -12,3 +12,4 @@ tqdm
 PyYAML
 diffusers
 rawpy
+mlflow
