@@ -2,7 +2,7 @@
 # Setup Configuration
 # ###########################################
 env_cfg:
-  run_name: debug
+  run_name: sid-evalx300
   project_name: elir-sid-lowlight
   task: lowlight_enhancement
   out_dir: out_dir
@@ -13,8 +13,8 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  train_dataset: { name: SID, path: /tmp/sid/, task: lowlight_enhancement, batch_size: 32, patch_size: 256, num_workers: 16}
-  val_dataset: { name: SID, path: /tmp/sid, task: lowlight_enhancement, batch_size: 16, patch_size: 256, num_workers: 16}
+  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: lowlight_enhancement, batch_size: 32, patch_size: 256, num_workers: 16}
+  val_dataset: { name: SID, path: /tmp/sid_phy/test_x300, task: lowlight_enhancement, batch_size: 16, patch_size: 256, num_workers: 16}
 
 
 # -------------------------------------------------
@@ -36,7 +36,7 @@ fm_cfg:
 # -------------------------------------------------
 model_cfg:
   arch_cfg: {name: elir,
-             params: { fm_cfg: {k_steps: 1, sigma_s: 0.04, latent_shape: [16,32,32]},
+             params: { fm_cfg: {k_steps: 3, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
                                              t_emb_dim: 160, overparametrization: True },
