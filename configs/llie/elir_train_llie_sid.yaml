@@ -2,9 +2,9 @@
 # Setup Configuration
 # ###########################################
 env_cfg:
-  run_name: sid-evalx300
-  project_name: elir-sid-lowlight
-  task: lowlight_enhancement
+  run_name: llie-sid-eval-300
+  project_name: elir-llie-sid
+  task: llie
   out_dir: out_dir
   seed: 2025
 
@@ -13,8 +13,8 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: lowlight_enhancement, batch_size: 32, patch_size: 256, num_workers: 16}
-  val_dataset: { name: SID, path: /tmp/sid_phy/test_x300, task: lowlight_enhancement, batch_size: 16, patch_size: 256, num_workers: 16}
+  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: llie, batch_size: 32, patch_size: 256, num_workers: 16}
+  val_dataset: { name: SID, path: /tmp/sid_phy/test_x300, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
 
 
 # -------------------------------------------------
@@ -36,13 +36,14 @@ fm_cfg:
 # -------------------------------------------------
 model_cfg:
   arch_cfg: {name: elir,
+             path: /workspace/elir_bsr.pth,
              params: { fm_cfg: {k_steps: 3, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
-                                             t_emb_dim: 160, overparametrization: True },
+                                             t_emb_dim: 160, overparametrization: False },
                                    trainable: True },
                        mmse_cfg: { name: rrdbnet,
-                                   params: { c_inout: 16, c_hid: 96, n_rrdb: 3, overparametrization: True },
+                                   params: { c_inout: 16, c_hid: 96, n_rrdb: 3, overparametrization: False },
                                    trainable: True },
                        enc_cfg: {name: tiny_enc,
                                 trainable: True},
