@@ -129,7 +129,7 @@ def run_train(conf):
         return sd
 
     # Save latest model
-    train_setup.ema.model.collapse()
+    # train_setup.ema.model.collapse()
     state_dict = train_setup.ema.model.state_dict()
     state_dict = adjust_weights(state_dict)
     torch.save(state_dict, os.path.join(run_dir, "elir.pth"))
