@@ -3,7 +3,7 @@
 # ###########################################
 env_cfg:
   run_name: elir-llie-sid-phy
-  project_name: elir-llie-sid
+  project_name: elir-llie
   task: llie
   out_dir: out_dir
   seed: 2025
