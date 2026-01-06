@@ -42,8 +42,14 @@ def run_train(conf):
     dataset_cfg = conf.get("dataset_cfg")
     train_dataset = dataset_cfg.get('train_dataset')
     trainloader = get_loader(train_dataset)
-    val_dataset = dataset_cfg.get('val_dataset')
-    valloader = get_loader(val_dataset)
+
+    val_datasets = dataset_cfg.get('val_datasets', [])
+    if not val_datasets:
+        # Fallback to single val_dataset for backward compatibility
+        val_dataset = dataset_cfg.get('val_dataset')
+        val_datasets = [val_dataset] if val_dataset else []
+
+    valloaders = [get_loader(vd) for vd in val_datasets]
 
     # ----------------------------
     # Create models
@@ -98,7 +104,7 @@ def run_train(conf):
     trainer = L.Trainer(max_epochs=train_cfg.get("epochs"),
                         default_root_dir = run_dir,
                         callbacks=checkpoint,
-                        strategy = "ddp",
+                        # strategy = "ddp",
                         devices = "auto",
                         accelerator="gpu",
                         logger = mlflow_logger,
@@ -108,18 +114,23 @@ def run_train(conf):
     torch.cuda.empty_cache()
     torch.set_float32_matmul_precision('high')
     set_seed(seed)
-    trainer.fit(train_setup, trainloader, valloader, ckpt_path=train_cfg.get("ckpt_path", None))
+
+    trainer.fit(train_setup, trainloader, valloaders, ckpt_path=train_cfg.get("ckpt_path", None))
 
     # ----------------------------
     # Evaluation
     # ----------------------------
-    results = trainer.validate(dataloaders=valloader, ckpt_path="last")
+    results = trainer.validate(dataloaders=valloaders, ckpt_path="last")
+
     metrics = eval_cfg.get("metrics")
-    for metric in metrics:
-        metric_value = results[0][metric]
-        print("{}: {:0.4f}".format(metric, metric_value), end =", ")
-        if train_cfg.get("mlflow", False):
-            mlflow_logger.log_metrics({"final_"+metric:metric_value}, step=trainer.current_epoch)
+
+    for idx, result in enumerate(results):
+        for metric in metrics:
+            metric_value = result[metric]
+            dataset_name = val_datasets[idx].get('path', f'val_{idx}')
+            print(f"{dataset_name}/{metric}: {metric_value:0.4f}", end=", ")
+            if train_cfg.get("mlflow", False):
+                mlflow_logger.log_metrics({f"final_{dataset_name}_{metric}": metric_value}, step=trainer.current_epoch)
 
     # ----------------------------
     # Save model

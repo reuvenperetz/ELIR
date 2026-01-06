@@ -62,9 +62,11 @@ class IRSetup(L.LightningModule):
         self.log("train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
-    def compute_metrics(self, x_hq_hat, x_hq):
+
+    def compute_metrics(self, x_hq_hat, x_hq, dataloader_idx=0):
         for metric_eval in self.metric_evals:
-            metric_eval.compute(x_hq_hat, x_hq)
+            metric_eval.compute(x_hq_hat, x_hq, dataloader_idx)
+
 
     def save_samples(self, current_epoch):
         save_image(torch.concat(self.samples,dim=0), os.path.join(self.samples_dir,"epoch_"+str(current_epoch)+".png"))
@@ -75,7 +77,7 @@ class IRSetup(L.LightningModule):
         else:
             return self.model.inference(x)
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         x_lq, y = batch
         chop = self.eval_cfg.get("chop", None)
         if chop:
@@ -108,13 +110,16 @@ class IRSetup(L.LightningModule):
         #         self.save_samples(self.current_epoch)
         #         self.samples.clear()
         # self.patch_saver.save_batch(x_lq, y_hat, y)
-        self.compute_metrics(y_hat, y)
+        self.compute_metrics(y_hat, y, dataloader_idx)
+
 
     def on_validation_epoch_end(self):
         self.log('global_step', self.global_step)
         for metric_eval in self.metric_evals:
-            result = metric_eval.get_final().item()
-            self.log(metric_eval.metric, result, sync_dist=True, prog_bar=True)
+            results = metric_eval.get_final_all()  # Returns dict per dataloader
+            for dl_idx, result in results.items():
+                suffix = f"_val{dl_idx}" if dl_idx > 0 else ""
+                self.log(f"{metric_eval.metric}{suffix}", result.item(), sync_dist=True, prog_bar=True)
         torch.cuda.empty_cache()
 
     def on_save_checkpoint(self, checkpoint):

@@ -2,7 +2,7 @@
 # Setup Configuration
 # ###########################################
 env_cfg:
-  run_name: llie-sid-eval-300
+  run_name: elir-llie-sid-phy
   project_name: elir-llie-sid
   task: llie
   out_dir: out_dir
@@ -14,8 +14,10 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: SID, path: /tmp/sid_phy/train, task: llie, batch_size: 32, patch_size: 256, num_workers: 16}
-  val_dataset: { name: SID, path: /tmp/sid_phy/test_x300, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
-
+  val_datasets:
+    - { name: SID, path: /tmp/sid_phy/test_x300, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
+    - { name: SID, path: /tmp/sid_phy/test_x250, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
+    - { name: SID, path: /tmp/sid_phy/test_x100, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
 
 # -------------------------------------------------
 # Flow-Matching
@@ -36,7 +38,7 @@ fm_cfg:
 # -------------------------------------------------
 model_cfg:
   arch_cfg: {name: elir,
-             path: /workspace/elir_bsr.pth,
+             path: elir_bsr.pth,
              params: { fm_cfg: {k_steps: 3, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
