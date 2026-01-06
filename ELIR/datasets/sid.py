@@ -6,6 +6,7 @@ from torchvision.transforms import v2
 from torch.utils.data import Dataset
 import os
 import glob
+import numpy as np
 from PIL import Image
 
 from ELIR.training.patch_tracker import PatchTracker
@@ -66,7 +67,42 @@ class SIDDataset(Dataset):
 
         return img_LQ, img_HQ
 
+class SIDFullImageDataset(Dataset):
+    """
+    Dataset that returns full images without patching.
+    Used for validation/testing.
+    """
+    def __init__(self, image_folder):
+        super().__init__()
 
+        self.lq_images_path = self.get_file_path(image_folder, "lq")
+        self.hq_images_path = self.get_file_path(image_folder, "hq")
+
+        assert len(self.lq_images_path) == len(self.hq_images_path), \
+            "LQ and HQ image count mismatch"
+
+        self.transform = v2.Compose([v2.ToTensor()])
+
+    def get_file_path(self, image_folder, q):
+        image_folder_split = os.path.join(image_folder, q)
+        return sorted(glob.glob(os.path.join(image_folder_split, "*.ARW")))
+
+    def __len__(self):
+        return len(self.lq_images_path)
+
+    def _load_image(self, path):
+        with rawpy.imread(path) as raw:
+            img = raw.postprocess()
+        return Image.fromarray(img)
+
+    def __getitem__(self, index):
+        img_LQ = self._load_image(self.lq_images_path[index])
+        img_HQ = self._load_image(self.hq_images_path[index])
+
+        img_LQ = self.transform(img_LQ)
+        img_HQ = self.transform(img_HQ)
+
+        return img_LQ, img_HQ
 
 class SIDPatchesDataset(Dataset):
     def __init__(self, image_folder, patch_size):
@@ -151,6 +187,104 @@ class SIDPatchesDataset(Dataset):
         return patch_LQ, patch_HQ
 
 
+class SIDRandomCropDataset(Dataset):
+    """
+    Dataset that returns one random crop per image with optional augmentations.
+    Each epoch samples different random crops from the images.
+    """
+    def __init__(self, image_folder, patch_size, augment=True,
+                 hflip=True, vflip=True, rotate=True):
+        super().__init__()
+
+        self.patch_size = patch_size
+        self.augment = augment
+        self.hflip = hflip
+        self.vflip = vflip
+        self.rotate = rotate
+
+        self.lq_images_path = self.get_file_path(image_folder, "lq")
+        self.hq_images_path = self.get_file_path(image_folder, "hq")
+
+        assert len(self.lq_images_path) == len(self.hq_images_path), \
+            "LQ and HQ image count mismatch"
+
+        self.transform = v2.Compose([v2.ToTensor()])
+
+    def get_file_path(self, image_folder, q):
+        image_folder_split = os.path.join(image_folder, q)
+        return sorted(glob.glob(os.path.join(image_folder_split, "*.ARW")))
+
+    def __len__(self):
+        return len(self.lq_images_path)
+
+    def _load_image(self, path):
+        with rawpy.imread(path) as raw:
+            img = raw.postprocess()
+        return img  # Return numpy array for easier augmentation
+
+    def _random_crop(self, img_lq, img_hq):
+        """Extract the same random crop from both LQ and HQ images."""
+        H, W, _ = img_lq.shape
+        P = self.patch_size
+
+        if H >= P and W >= P:
+            y = np.random.randint(0, H - P + 1)
+            x = np.random.randint(0, W - P + 1)
+            patch_lq = img_lq[y:y+P, x:x+P]
+            patch_hq = img_hq[y:y+P, x:x+P]
+        else:
+            # If image is smaller than patch_size, resize
+            patch_lq = np.array(Image.fromarray(img_lq).resize((P, P), Image.Resampling.BICUBIC))
+            patch_hq = np.array(Image.fromarray(img_hq).resize((P, P), Image.Resampling.BICUBIC))
+
+        return patch_lq, patch_hq
+
+    def _augment_pair(self, lq, hq):
+        """Apply the same random augmentations to both LQ and HQ patches."""
+        # Random horizontal flip
+        if self.hflip and np.random.rand() < 0.5:
+            lq = np.fliplr(lq).copy()
+            hq = np.fliplr(hq).copy()
+
+        # Random vertical flip
+        if self.vflip and np.random.rand() < 0.5:
+            lq = np.flipud(lq).copy()
+            hq = np.flipud(hq).copy()
+
+        # Random 90-degree rotation (0, 90, 180, or 270 degrees)
+        if self.rotate:
+            k = np.random.randint(0, 4)
+            if k > 0:
+                lq = np.rot90(lq, k).copy()
+                hq = np.rot90(hq, k).copy()
+
+        return lq, hq
+
+    def __getitem__(self, index):
+        # Load both images
+        img_LQ = self._load_image(self.lq_images_path[index])
+        img_HQ = self._load_image(self.hq_images_path[index])
+
+        # Random crop (same location for both)
+        patch_LQ, patch_HQ = self._random_crop(img_LQ, img_HQ)
+
+        # Apply augmentations
+        if self.augment:
+            patch_LQ, patch_HQ = self._augment_pair(patch_LQ, patch_HQ)
+
+        # Ensure correct shape (H, W, C)
+        assert patch_LQ.shape == (self.patch_size, self.patch_size, 3), \
+            f"Unexpected LQ shape: {patch_LQ.shape}"
+        assert patch_HQ.shape == (self.patch_size, self.patch_size, 3), \
+            f"Unexpected HQ shape: {patch_HQ.shape}"
+
+        # Convert to PIL and transform to tensor
+        patch_LQ = self.transform(Image.fromarray(patch_LQ))
+        patch_HQ = self.transform(Image.fromarray(patch_HQ))
+
+        return patch_LQ, patch_HQ
+
+
 class SID(BasicLoader):
     def __init__(self):
         super().__init__()
@@ -160,15 +294,36 @@ class SID(BasicLoader):
         batch_size = dataset_params.get("batch_size", 32)
         num_workers = dataset_params.get("num_workers", 4)
         patch_size = dataset_params.get("patch_size", 64)
+        shuffle = dataset_params.get("shuffle", True)
 
-        # Dataset
-        dataset = SIDPatchesDataset(path, patch_size)
-        # Loader
+        # Random crop mode options (default: False = use all patches)
+        full_image = dataset_params.get("full_image", False)
+        random_crop = dataset_params.get("random_crop", False)
+        augment = dataset_params.get("augment", True)
+        hflip = dataset_params.get("hflip", True)
+        vflip = dataset_params.get("vflip", True)
+        rotate = dataset_params.get("rotate", True)
+
+        # Choose dataset based on mode
+        if full_image:
+            dataset = SIDFullImageDataset(path)
+        elif random_crop:
+            dataset = SIDRandomCropDataset(
+                path, patch_size,
+                augment=augment,
+                hflip=hflip,
+                vflip=vflip,
+                rotate=rotate
+            )
+        else:
+            dataset = SIDPatchesDataset(path, patch_size)
+
+        # Loader - use batch_size=1 for full images (different sizes)
         loader = DataLoader(dataset,
-                             batch_size=batch_size,
-                             shuffle=False,
-                             num_workers=num_workers,
-                             pin_memory=True,
-                             drop_last=False)
+                            batch_size=1 if full_image else batch_size,
+                            shuffle=shuffle,
+                            num_workers=num_workers,
+                            pin_memory=True,
+                            drop_last=not full_image)
 
         return loader

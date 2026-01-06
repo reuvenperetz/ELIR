@@ -87,6 +87,16 @@ def run_train(conf):
                                      run_name=run_name)
         mlflow_logger.log_hyperparams(dict(**conf))
 
+    # Extract validation dataset names for image logging
+    val_dataset_names = []
+    for i, vd in enumerate(val_datasets):
+        # Use 'name' field if available, otherwise extract from path, or use index
+        name = vd.get('dataset_name', None) or os.path.basename(vd.get('path', f'val_{i}'))
+        val_dataset_names.append(name)
+
+    # Image logging mode: "none", "local" (default), or "mlflow"
+    image_logging_mode = train_cfg.get("image_logging_mode", "local")
+
     # Training
     train_setup = IRSetup(model,
                          fm_cfg=fm_cfg,
@@ -96,7 +106,9 @@ def run_train(conf):
                          ema_decay=train_cfg.get("ema_decay", 0.999),
                          eval_cfg=eval_cfg,
                          run_dir=run_dir,
-                         save_images=train_cfg.get("save_images", True))
+                         save_images=train_cfg.get("save_images", True),
+                         val_dataset_names=val_dataset_names,
+                         image_logging_mode=image_logging_mode)
     checkpoint = ModelCheckpoint(run_dir,
                                  every_n_epochs=1,
                                  save_weights_only=train_cfg.get("save_weights_only", True), save_top_k=1,
@@ -152,10 +164,10 @@ if __name__ == "__main__":
     # ----------------------------
     # Parse arguments
     # ----------------------------
-    yaml_path, overides = argument_handler()
+    yaml_path, overides, dot_overrides = argument_handler()
     with open(yaml_path) as yaml_stream:
         conf = load_hyperpyyaml(yaml_stream)
-    set_overides(conf, overides)
+    set_overides(conf, overides, dot_overrides)
 
     # ----------------------------
     # Train

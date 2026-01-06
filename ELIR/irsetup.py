@@ -11,13 +11,16 @@ import os
 import torch.nn.functional as F
 from ELIR.utils import ImageSpliterTh
 import math
+from PIL import Image
+import numpy as np
 
 from patch_saver import PatchSaver
 
 
 class IRSetup(L.LightningModule):
     def __init__(self, model, fm_cfg={}, optimizer=None, scheduler=None, tmodel=None,
-                 ema_decay=None, eval_cfg=None, run_dir=None, save_images=True):
+                 ema_decay=None, eval_cfg=None, run_dir=None, save_images=True,
+                 val_dataset_names=None, image_logging_mode="local"):
         super().__init__()
         self.model = model
         self.fm_cfg = fm_cfg
@@ -43,6 +46,14 @@ class IRSetup(L.LightningModule):
             os.makedirs(self.samples_dir, exist_ok=True)  # run folder
             self.samples = []
         self.patch_saver = PatchSaver()
+
+        # For MLflow image logging per validation dataset
+        self.val_dataset_names = val_dataset_names or []
+        self.val_samples = {}  # Dict: dataloader_idx -> (input, prediction, ground_truth)
+
+        # Image logging mode: "none", "local" (default), or "mlflow"
+        self.image_logging_mode = image_logging_mode
+        self.logged_reference_images = set()  # Track which dataloaders have logged input/gt
 
     def optimizer_step(
         self,
@@ -104,12 +115,15 @@ class IRSetup(L.LightningModule):
         else:
             y_hat = self.infer(x_lq)
 
-        # if self.current_epoch > 0 and batch_idx < 2 and self.samples_dir and torch.cuda.current_device()==0:
-        #     self.samples.append(y_hat[:2,...]) # save 2 images
-        #     if len(self.samples) == 2: # save 2 batches
-        #         self.save_samples(self.current_epoch)
-        #         self.samples.clear()
-        # self.patch_saver.save_batch(x_lq, y_hat, y)
+        # Capture one sample per validation dataloader for MLflow image logging
+        if batch_idx == 0 and dataloader_idx not in self.val_samples:
+            # Store first batch's first image for each validation dataloader
+            self.val_samples[dataloader_idx] = (
+                x_lq[0:1].detach().cpu(),
+                y_hat[0:1].detach().cpu(),
+                y[0:1].detach().cpu()
+            )
+
         self.compute_metrics(y_hat, y, dataloader_idx)
 
 
@@ -120,7 +134,67 @@ class IRSetup(L.LightningModule):
             for dl_idx, result in results.items():
                 suffix = f"_val{dl_idx}" if dl_idx > 0 else ""
                 self.log(f"{metric_eval.metric}{suffix}", result.item(), sync_dist=True, prog_bar=True)
+
+        # Log comparison images to MLflow
+        self._log_validation_images()
+
+        # Clear samples for next epoch
+        self.val_samples.clear()
         torch.cuda.empty_cache()
+
+    def _log_validation_images(self):
+        """Log validation images. Input/GT saved only on first epoch, predictions saved every epoch."""
+        if self.image_logging_mode == "none":
+            return
+
+        if self.image_logging_mode == "local" and self.samples_dir is None:
+            return
+
+        if self.image_logging_mode == "mlflow" and self.logger is None:
+            return
+
+        for dl_idx, (x_lq, y_hat, y) in self.val_samples.items():
+            # Get dataset name
+            if dl_idx < len(self.val_dataset_names):
+                dataset_name = self.val_dataset_names[dl_idx]
+            else:
+                dataset_name = f"val_{dl_idx}"
+
+            # Save input and ground truth only once (first epoch for each dataloader)
+            if dl_idx not in self.logged_reference_images:
+                self._save_single_image(x_lq, dataset_name, "input")
+                self._save_single_image(y, dataset_name, "ground_truth")
+                self.logged_reference_images.add(dl_idx)
+
+            # Save prediction every epoch
+            self._save_single_image(y_hat, dataset_name, f"pred_epoch_{self.current_epoch}")
+
+    def _save_single_image(self, tensor, dataset_name, image_name):
+        """Save a single image tensor locally or to MLflow."""
+        # Convert tensor to PIL image
+        img = tensor[0].clamp(0, 1)  # Take first image, clamp to [0,1]
+        img_np = (img.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+        pil_image = Image.fromarray(img_np)
+
+        # Create subfolder for this dataset
+        if self.samples_dir:
+            dataset_dir = os.path.join(self.samples_dir, dataset_name)
+            os.makedirs(dataset_dir, exist_ok=True)
+            save_path = os.path.join(dataset_dir, f"{image_name}.png")
+            pil_image.save(save_path)
+
+            # If mlflow mode, also log to MLflow
+            if self.image_logging_mode == "mlflow":
+                try:
+                    if hasattr(self.logger, 'experiment') and self.logger.experiment is not None:
+                        self.logger.experiment.log_artifact(
+                            self.logger.run_id,
+                            save_path,
+                            artifact_path=f"val_images/{dataset_name}"
+                        )
+                except Exception as e:
+                    print(f"Warning: Could not log image to MLflow: {e}")
+
 
     def on_save_checkpoint(self, checkpoint):
         if self.ema:

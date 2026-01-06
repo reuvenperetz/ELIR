@@ -13,11 +13,38 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: llie, batch_size: 32, patch_size: 256, num_workers: 16}
+  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: llie, batch_size: 32, patch_size: 256, num_workers: 16, random_crop: true, augment: true, shuffle: true}
   val_datasets:
-    - { name: SID, path: /tmp/sid_phy/test_x300, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
-    - { name: SID, path: /tmp/sid_phy/test_x250, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
-    - { name: SID, path: /tmp/sid_phy/test_x100, task: llie, batch_size: 16, patch_size: 256, num_workers: 16}
+    - { name: SID,
+        path: /tmp/sid_phy/test_x300,
+        task: llie,
+        batch_size: 16,
+        patch_size: 256,
+        num_workers: 16,
+        random_crop: false,
+        shuffle: false,
+        full_image: true      # Use entire images for validation
+    }
+    - { name: SID,
+        path: /tmp/sid_phy/test_x250,
+        task: llie,
+        batch_size: 16,
+        patch_size: 256,
+        num_workers: 16,
+        random_crop: false,
+        shuffle: false,
+        full_image: true      # Use entire images for validation
+    }
+    - { name: SID,
+        path: /tmp/sid_phy/test_x100,
+        task: llie,
+        batch_size: 16,
+        patch_size: 256,
+        num_workers: 16,
+        random_crop: false,
+        shuffle: false,
+        full_image: true      # Use entire images for validation
+    }
 
 # -------------------------------------------------
 # Flow-Matching
@@ -38,7 +65,7 @@ fm_cfg:
 # -------------------------------------------------
 model_cfg:
   arch_cfg: {name: elir,
-             path: elir_bsr.pth,
+             path: /workspace/elir_bsr.pth,
              params: { fm_cfg: {k_steps: 3, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
@@ -70,6 +97,12 @@ train_cfg:
   wandb: False
   mlflow: True
   mlflow_tracking_uri: ./mlruns
+  # Image logging mode for validation samples:
+  #   "none"  - don't save validation images
+  #   "local" - save to local samples folder (default)
+  #   "mlflow" - save locally AND log to MLflow artifacts
+  # Note: input/ground_truth saved once (first epoch), predictions saved every epoch
+  image_logging_mode: local
 
 
 
