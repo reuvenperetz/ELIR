@@ -107,7 +107,7 @@ class IRSetup(L.LightningModule):
         #     if len(self.samples) == 2: # save 2 batches
         #         self.save_samples(self.current_epoch)
         #         self.samples.clear()
-        self.patch_saver.save_batch(x_lq, y_hat, y)
+        # self.patch_saver.save_batch(x_lq, y_hat, y)
         self.compute_metrics(y_hat, y)
 
     def on_validation_epoch_end(self):
