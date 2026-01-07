@@ -68,6 +68,9 @@ class IRSetup(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x_lq, x_hq = batch[0], batch[1]
+        # Print input shape for each rank (useful for DDP debugging)
+        rank = self.global_rank if hasattr(self, 'global_rank') else 0
+        print(f"[Rank {rank}] Train batch {batch_idx} - x_lq: {x_lq.shape}, x_hq: {x_hq.shape}")
         # Loss function
         loss = get_loss(self.model, x_hq, x_lq, self.fm_cfg, self.tmodel)
         self.log("train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
@@ -90,6 +93,9 @@ class IRSetup(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         x_lq, y = batch
+        # Print input shape for each rank (useful for DDP debugging)
+        rank = self.global_rank if hasattr(self, 'global_rank') else 0
+        print(f"[Rank {rank}] Val dataloader {dataloader_idx} batch {batch_idx} - x_lq: {x_lq.shape}, y: {y.shape}")
         chop = self.eval_cfg.get("chop", None)
         if chop:
             sf = chop.get("sf", 4)
