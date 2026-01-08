@@ -65,14 +65,13 @@ fm_cfg:
 # -------------------------------------------------
 model_cfg:
   arch_cfg: {name: elir,
-             path: /workspace/elir_bsr.pth,
              params: { fm_cfg: {k_steps: 3, sigma_s: 0.04, latent_shape: [16,32,32]},
                        fmir_cfg: { name: lunet,
                                    params: { ch_mult: [1,2,1,2], n_mid_blocks: 1, in_channels: 16, hid_channels: 96, out_channels: 16,
-                                             t_emb_dim: 160, overparametrization: False },
+                                             t_emb_dim: 160, overparametrization: True },
                                    trainable: True },
                        mmse_cfg: { name: rrdbnet,
-                                   params: { c_inout: 16, c_hid: 96, n_rrdb: 3, overparametrization: False },
+                                   params: { c_inout: 16, c_hid: 96, n_rrdb: 3, overparametrization: True },
                                    trainable: True },
                        enc_cfg: {name: tiny_enc,
                                 trainable: True},
@@ -110,4 +109,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "ssim"]
+  metrics: ["lpips","psnr", "ssim", "niqe", "fid", "musiq", "clipiqa"]
