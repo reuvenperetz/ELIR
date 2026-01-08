@@ -116,7 +116,7 @@ def run_train(conf):
     trainer = L.Trainer(max_epochs=train_cfg.get("epochs"),
                         default_root_dir = run_dir,
                         callbacks=checkpoint,
-                        strategy = "ddp",
+                        # strategy = "ddp",
                         devices = "auto",
                         accelerator="gpu",
                         logger = mlflow_logger,
