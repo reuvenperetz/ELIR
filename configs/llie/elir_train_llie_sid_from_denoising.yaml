@@ -89,7 +89,7 @@ train_cfg:
   epochs: 250
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
-  optimizer_params: {}
+  optimizer_params: {'weight_decay': 0.1}
   ema_decay: 0.999
   max_steps: -1 # run only several steps
   check_val_every_n_epoch: 3
