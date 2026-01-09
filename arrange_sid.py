@@ -1,7 +1,9 @@
 import os
 import shutil
+import json
 from pathlib import Path
 from tqdm import tqdm
+from collections import defaultdict
 
 
 def parse_list_file(list_path, is_physics_format=False):
@@ -37,9 +39,17 @@ def parse_list_file(list_path, is_physics_format=False):
 
     return pairs
 
-def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physics_split=None):
+
+def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False, physics_split=None):
     """
-    Arrange SID Sony dataset into lq/hq folder pairs based on train/val/test lists.
+    Arrange SID Sony dataset with deduplicated HQ images.
+
+    Instead of copying the same HQ image multiple times, we:
+    1. Copy each unique HQ image only once
+    2. Copy all LQ images
+    3. Create a mapping.json file that maps LQ filenames to HQ filenames
+
+    This saves significant disk space since each HQ image is paired with multiple LQ images.
 
     Args:
         archive_path: Path to the 'archive' folder containing Sony/long and Sony/short
@@ -47,8 +57,6 @@ def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physi
         list_dir: Directory containing Sony_train_list.txt, Sony_val_list.txt, Sony_test_list.txt
         no_val: If True, merge validation into training (only train/test splits)
         physics_split: Path to SID_Sony_15_paired.txt file for ELD/physics-based partition.
-                      If provided, creates train/test split where test contains pairs from this file
-                      and train contains all other pairs.
     """
     archive_path = Path(archive_path)
     output_path = Path(output_path)
@@ -67,7 +75,6 @@ def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physi
         print(f"Loaded {len(test_pairs_with_ratio)} test pairs from physics split file")
 
         # Group test pairs by ratio
-        from collections import defaultdict
         test_by_ratio = defaultdict(list)
         for short_path, long_path, ratio in test_pairs_with_ratio:
             test_by_ratio[ratio].append((short_path, long_path))
@@ -105,69 +112,22 @@ def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physi
         for ratio, pairs in test_by_ratio.items():
             splits[f"test_x{ratio}"] = pairs
 
-        # Process each split
-        for split_name, pairs in splits.items():
-            print(f"\n{'=' * 50}")
-            print(f"Processing {split_name} split...")
-            print(f"{'=' * 50}")
-
-            lq_dir = output_path / split_name / "lq"
-            hq_dir = output_path / split_name / "hq"
-            lq_dir.mkdir(parents=True, exist_ok=True)
-            hq_dir.mkdir(parents=True, exist_ok=True)
-
-            missing = []
-            copied = 0
-            for idx, (short_rel, long_rel) in enumerate(tqdm(pairs, desc=f"Arranging {split_name}")):
-                short_path = archive_path / short_rel
-                long_path = archive_path / long_rel
-
-                if not short_path.exists():
-                    missing.append(f"short: {short_rel}")
-                    continue
-                if not long_path.exists():
-                    missing.append(f"long: {long_rel}")
-                    continue
-
-                ext_short = short_path.suffix
-                ext_long = long_path.suffix
-
-                shutil.copy2(short_path, lq_dir / f"{idx:05d}{ext_short}")
-                shutil.copy2(long_path, hq_dir / f"{idx:05d}{ext_long}")
-                copied += 1
-
-            if missing:
-                print(f"\n⚠️  {len(missing)} files missing:")
-                for m in missing[:5]:
-                    print(f"   {m}")
-                if len(missing) > 5:
-                    print(f"   ... and {len(missing) - 5} more")
-
-            print(f"✅ {split_name}: {copied} pairs")
     else:
         # Original SID partition
         if no_val:
-            splits = {
+            split_files = {
                 "train": ["Sony_train_list.txt", "Sony_val_list.txt"],
                 "test": ["Sony_test_list.txt"],
             }
         else:
-            splits = {
+            split_files = {
                 "train": ["Sony_train_list.txt"],
                 "val": ["Sony_val_list.txt"],
                 "test": ["Sony_test_list.txt"],
             }
 
-        for split_name, list_files in splits.items():
-            print(f"\n{'=' * 50}")
-            print(f"Processing {split_name} split...")
-            print(f"{'=' * 50}")
-
-            lq_dir = output_path / split_name / "lq"
-            hq_dir = output_path / split_name / "hq"
-            lq_dir.mkdir(parents=True, exist_ok=True)
-            hq_dir.mkdir(parents=True, exist_ok=True)
-
+        splits = {}
+        for split_name, list_files in split_files.items():
             all_pairs = []
             for list_file in list_files:
                 list_path = list_dir / list_file
@@ -175,41 +135,97 @@ def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physi
                     print(f"⚠️  List file not found: {list_path}")
                     continue
                 pairs = parse_list_file(list_path)
-                all_pairs.extend(pairs)
+                all_pairs.extend([(p[0], p[1]) for p in pairs])
                 print(f"  Loaded {len(pairs)} pairs from {list_file}")
+            splits[split_name] = all_pairs
 
-            missing = []
-            copied = 0
-            for idx, (short_rel, long_rel) in enumerate(tqdm(all_pairs, desc=f"Arranging {split_name}")):
+    # Process each split with deduplication
+    for split_name, pairs in splits.items():
+        print(f"\n{'=' * 50}")
+        print(f"Processing {split_name} split (with HQ deduplication)...")
+        print(f"{'=' * 50}")
+
+        lq_dir = output_path / split_name / "lq"
+        hq_dir = output_path / split_name / "hq"
+        lq_dir.mkdir(parents=True, exist_ok=True)
+        hq_dir.mkdir(parents=True, exist_ok=True)
+
+        # Group LQ images by their HQ counterpart
+        hq_to_lq = defaultdict(list)
+        for short_rel, long_rel in pairs:
+            hq_to_lq[long_rel].append(short_rel)
+
+        print(f"  Total pairs: {len(pairs)}")
+        print(f"  Unique HQ images: {len(hq_to_lq)}")
+        print(f"  Space savings: {len(pairs) - len(hq_to_lq)} fewer HQ copies")
+
+        # Mapping: lq_filename -> hq_filename
+        mapping = {}
+        missing = []
+        lq_copied = 0
+        hq_copied = 0
+
+        # Process each unique HQ image
+        for hq_idx, (long_rel, short_list) in enumerate(tqdm(hq_to_lq.items(), desc=f"Arranging {split_name}")):
+            long_path = archive_path / long_rel
+
+            if not long_path.exists():
+                missing.append(f"long: {long_rel}")
+                continue
+
+            # Copy HQ image once
+            ext_long = long_path.suffix
+            hq_filename = f"{hq_idx:05d}{ext_long}"
+            shutil.copy2(long_path, hq_dir / hq_filename)
+            hq_copied += 1
+
+            # Copy all corresponding LQ images
+            for lq_idx, short_rel in enumerate(short_list):
                 short_path = archive_path / short_rel
-                long_path = archive_path / long_rel
 
                 if not short_path.exists():
                     missing.append(f"short: {short_rel}")
                     continue
-                if not long_path.exists():
-                    missing.append(f"long: {long_rel}")
-                    continue
 
                 ext_short = short_path.suffix
-                ext_long = long_path.suffix
+                # Use combined index to ensure unique LQ filenames
+                lq_filename = f"{hq_idx:05d}_{lq_idx:02d}{ext_short}"
+                shutil.copy2(short_path, lq_dir / lq_filename)
+                lq_copied += 1
 
-                shutil.copy2(short_path, lq_dir / f"{idx:05d}{ext_short}")
-                shutil.copy2(long_path, hq_dir / f"{idx:05d}{ext_long}")
-                copied += 1
+                # Add to mapping
+                mapping[lq_filename] = hq_filename
 
-            if missing:
-                print(f"\n⚠️  {len(missing)} files missing:")
-                for m in missing[:5]:
-                    print(f"   {m}")
-                if len(missing) > 5:
-                    print(f"   ... and {len(missing) - 5} more")
+        # Save mapping file
+        mapping_path = output_path / split_name / "mapping.json"
+        with open(mapping_path, "w") as f:
+            json.dump(mapping, f, indent=2)
 
-            print(f"✅ {split_name}: {copied} pairs")
+        if missing:
+            print(f"\n⚠️  {len(missing)} files missing:")
+            for m in missing[:5]:
+                print(f"   {m}")
+            if len(missing) > 5:
+                print(f"   ... and {len(missing) - 5} more")
+
+        print(f"✅ {split_name}:")
+        print(f"   LQ images: {lq_copied}")
+        print(f"   HQ images: {hq_copied} (deduplicated from {len(pairs)} pairs)")
+        print(f"   Mapping saved to: {mapping_path}")
 
     print(f"\n{'=' * 50}")
     print("Done!")
     print(f"{'=' * 50}")
+
+
+# Keep the old function for backwards compatibility
+def arrange_sid_dataset(archive_path, output_path, list_dir, no_val=False, physics_split=None):
+    """
+    Original function that duplicates HQ images.
+    Use arrange_sid_dataset_dedup for space-efficient version.
+    """
+    # ... (original implementation kept for backwards compatibility)
+    arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val, physics_split)
 
 
 if __name__ == "__main__":
@@ -226,4 +242,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    arrange_sid_dataset(args.archive_path, args.output, args.list_dir, args.no_val, args.physics_split)
+    arrange_sid_dataset_dedup(args.archive_path, args.output, args.list_dir, args.no_val, args.physics_split)

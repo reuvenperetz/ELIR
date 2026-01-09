@@ -71,17 +71,49 @@ class SIDFullImageDataset(Dataset):
     """
     Dataset that returns full images without patching.
     Used for validation/testing.
+
+    Supports deduplicated HQ images via mapping.json file.
     """
     def __init__(self, image_folder):
         super().__init__()
 
-        self.lq_images_path = self.get_file_path(image_folder, "lq")
-        self.hq_images_path = self.get_file_path(image_folder, "hq")
+        self.image_folder = image_folder
 
-        assert len(self.lq_images_path) == len(self.hq_images_path), \
-            "LQ and HQ image count mismatch"
+        # Check for mapping file (deduplicated HQ images)
+        self.mapping = None
+        mapping_path = os.path.join(image_folder, "mapping.json")
+        if os.path.exists(mapping_path):
+            import json
+            with open(mapping_path, 'r') as f:
+                self.mapping = json.load(f)
+            print(f"[SIDFullImageDataset] Loaded mapping file with {len(self.mapping)} LQ->HQ mappings")
+
+        self.lq_images_path = self.get_file_path(image_folder, "lq")
+
+        if self.mapping:
+            # Build HQ paths from mapping
+            self.hq_images_path = self._build_hq_paths_from_mapping()
+        else:
+            # Original behavior: assume 1:1 correspondence
+            self.hq_images_path = self.get_file_path(image_folder, "hq")
+            assert len(self.lq_images_path) == len(self.hq_images_path), \
+                "LQ and HQ image count mismatch"
 
         self.transform = v2.Compose([v2.ToTensor()])
+
+    def _build_hq_paths_from_mapping(self):
+        """Build list of HQ paths corresponding to each LQ image using the mapping."""
+        hq_dir = os.path.join(self.image_folder, "hq")
+        hq_paths = []
+        for lq_path in self.lq_images_path:
+            lq_filename = os.path.basename(lq_path)
+            if lq_filename in self.mapping:
+                hq_filename = self.mapping[lq_filename]
+                hq_paths.append(os.path.join(hq_dir, hq_filename))
+            else:
+                print(f"[SIDFullImageDataset] Warning: {lq_filename} not found in mapping")
+                hq_paths.append(None)
+        return hq_paths
 
     def get_file_path(self, image_folder, q):
         image_folder_split = os.path.join(image_folder, q)
@@ -105,20 +137,54 @@ class SIDFullImageDataset(Dataset):
         return img_LQ, img_HQ
 
 class SIDPatchesDataset(Dataset):
+    """
+    Dataset that extracts all patches from images.
+    Supports deduplicated HQ images via mapping.json file.
+    """
     def __init__(self, image_folder, patch_size):
         super().__init__()
 
+        self.image_folder = image_folder
         self.patch_size = patch_size
-        self.lq_images_path = self.get_file_path(image_folder, "lq")
-        self.hq_images_path = self.get_file_path(image_folder, "hq")
 
-        assert len(self.lq_images_path) == len(self.hq_images_path), \
-            "LQ and HQ image count mismatch"
+        # Check for mapping file (deduplicated HQ images)
+        self.mapping = None
+        mapping_path = os.path.join(image_folder, "mapping.json")
+        if os.path.exists(mapping_path):
+            import json
+            with open(mapping_path, 'r') as f:
+                self.mapping = json.load(f)
+            print(f"[SIDPatchesDataset] Loaded mapping file with {len(self.mapping)} LQ->HQ mappings")
+
+        self.lq_images_path = self.get_file_path(image_folder, "lq")
+
+        if self.mapping:
+            # Build HQ paths from mapping
+            self.hq_images_path = self._build_hq_paths_from_mapping()
+        else:
+            # Original behavior: assume 1:1 correspondence
+            self.hq_images_path = self.get_file_path(image_folder, "hq")
+            assert len(self.lq_images_path) == len(self.hq_images_path), \
+                "LQ and HQ image count mismatch"
 
         self.transform_LQ, self.transform_HQ = self.preprocess()
 
         # Precompute all patch indices
         self.patches = self._compute_patches()
+
+    def _build_hq_paths_from_mapping(self):
+        """Build list of HQ paths corresponding to each LQ image using the mapping."""
+        hq_dir = os.path.join(self.image_folder, "hq")
+        hq_paths = []
+        for lq_path in self.lq_images_path:
+            lq_filename = os.path.basename(lq_path)
+            if lq_filename in self.mapping:
+                hq_filename = self.mapping[lq_filename]
+                hq_paths.append(os.path.join(hq_dir, hq_filename))
+            else:
+                print(f"[SIDPatchesDataset] Warning: {lq_filename} not found in mapping")
+                hq_paths.append(None)
+        return hq_paths
 
 
     def get_file_path(self, image_folder, q):
@@ -192,16 +258,19 @@ class SIDRandomCropDataset(Dataset):
     Dataset that returns one random crop per image with optional augmentations.
     Each epoch samples different random crops from the images.
 
-    Supports dynamic patch sizes via patch_size_schedule configuration:
-        patch_size_schedule:
-          sizes: [128, 256, 384, 512]  # Available patch sizes
-          mode: "random"                # random, increasing, decreasing, cyclic, step
+    Supports:
+    - Dynamic patch sizes via patch_size_schedule configuration
+    - Deduplicated HQ images via mapping.json file
+
+    If mapping.json exists in the image_folder, it will be used to map LQ->HQ filenames,
+    allowing for space-efficient storage where each HQ image is stored only once.
     """
     def __init__(self, image_folder, patch_size, augment=True,
                  hflip=True, vflip=True, rotate=True,
                  patch_size_schedule=None, total_epochs=None):
         super().__init__()
 
+        self.image_folder = image_folder
         self.base_patch_size = patch_size
         self.patch_size = patch_size  # Current patch size (may change dynamically)
         self.augment = augment
@@ -221,16 +290,46 @@ class SIDRandomCropDataset(Dataset):
             if self.patch_size_scheduler:
                 print(f"[SIDRandomCropDataset] Dynamic patch size enabled: {self.patch_size_scheduler}")
 
-        self.lq_images_path = self.get_file_path(image_folder, "lq")
-        self.hq_images_path = self.get_file_path(image_folder, "hq")
+        # Check for mapping file (deduplicated HQ images)
+        self.mapping = None
+        mapping_path = os.path.join(image_folder, "mapping.json")
+        if os.path.exists(mapping_path):
+            import json
+            with open(mapping_path, 'r') as f:
+                self.mapping = json.load(f)
+            print(f"[SIDRandomCropDataset] Loaded mapping file with {len(self.mapping)} LQ->HQ mappings")
 
-        assert len(self.lq_images_path) == len(self.hq_images_path), \
-            "LQ and HQ image count mismatch"
+        # Get file paths
+        self.lq_images_path = self.get_file_path(image_folder, "lq")
+
+        if self.mapping:
+            # Build HQ paths from mapping
+            self.hq_images_path = self._build_hq_paths_from_mapping()
+        else:
+            # Original behavior: assume 1:1 correspondence
+            self.hq_images_path = self.get_file_path(image_folder, "hq")
+            assert len(self.lq_images_path) == len(self.hq_images_path), \
+                "LQ and HQ image count mismatch"
 
         self.transform = v2.Compose([v2.ToTensor()])
 
         # Track current epoch for scheduling
         self.current_epoch = 0
+
+    def _build_hq_paths_from_mapping(self):
+        """Build list of HQ paths corresponding to each LQ image using the mapping."""
+        hq_dir = os.path.join(self.image_folder, "hq")
+        hq_paths = []
+        for lq_path in self.lq_images_path:
+            lq_filename = os.path.basename(lq_path)
+            if lq_filename in self.mapping:
+                hq_filename = self.mapping[lq_filename]
+                hq_paths.append(os.path.join(hq_dir, hq_filename))
+            else:
+                # Fallback: try to find matching HQ by index
+                print(f"[SIDRandomCropDataset] Warning: {lq_filename} not found in mapping")
+                hq_paths.append(None)
+        return hq_paths
 
     def set_epoch(self, epoch: int):
         """Set the current epoch for patch size scheduling."""
