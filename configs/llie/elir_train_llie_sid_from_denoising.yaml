@@ -14,7 +14,7 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: SID,
-                   path: /tmp/sid_phy/train,
+                   path: /tmp/sid_phy_dedup/train,
                    task: llie,
                    batch_size: 32,
                    patch_size: 256,
@@ -24,7 +24,7 @@ dataset_cfg:
                    shuffle: true}
   val_datasets:
     - { name: SID,
-        path: /tmp/sid_phy/test_x300,
+        path: /tmp/sid_phy_dedup/test_x300,
         task: llie,
         batch_size: 16,
         patch_size: 256,
@@ -34,7 +34,7 @@ dataset_cfg:
         full_image: true      # Use entire images for validation
     }
     - { name: SID,
-        path: /tmp/sid_phy/test_x250,
+        path: /tmp/sid_phy_dedup/test_x250,
         task: llie,
         batch_size: 16,
         patch_size: 256,
@@ -44,7 +44,7 @@ dataset_cfg:
         full_image: true      # Use entire images for validation
     }
     - { name: SID,
-        path: /tmp/sid_phy/test_x100,
+        path: /tmp/sid_phy_dedup/test_x100,
         task: llie,
         batch_size: 16,
         patch_size: 256,
@@ -101,7 +101,7 @@ train_cfg:
   optimizer_params: {}
   ema_decay: 0.999
   max_steps: -1 # run only several steps
-  check_val_every_n_epoch: 3
+  check_val_every_n_epoch: 1
   num_sanity_val_steps: 2
   wandb: False
   mlflow: True
@@ -119,4 +119,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "fid"]
+  metrics: ["lpips","psnr", "fid", "ssim", "niqe"]
