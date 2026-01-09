@@ -40,7 +40,14 @@ def run_train(conf):
     # Prepare datasets
     # ----------------------------
     dataset_cfg = conf.get("dataset_cfg")
+    train_cfg = conf.get("train_cfg")
+
+    # Get total epochs for dynamic patch size scheduling
+    total_epochs = train_cfg.get("epochs", 100)
+
     train_dataset = dataset_cfg.get('train_dataset')
+    # Pass total_epochs to training dataset for patch size scheduling
+    train_dataset['total_epochs'] = total_epochs
     trainloader = get_loader(train_dataset)
 
     val_datasets = dataset_cfg.get('val_datasets', [])

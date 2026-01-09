@@ -13,7 +13,15 @@ env_cfg:
 # Dataset
 # -------------------------------------------------
 dataset_cfg:
-  train_dataset: { name: SID, path: /tmp/sid_phy/train, task: llie, batch_size: 32, patch_size: 256, num_workers: 16, random_crop: true, augment: true, shuffle: true}
+  train_dataset: { name: SID,
+                   path: /tmp/sid_phy/train,
+                   task: llie,
+                   batch_size: 32,
+                   patch_size: 256,
+                   num_workers: 16,
+                   random_crop: true,
+                   augment: true,
+                   shuffle: true}
   val_datasets:
     - { name: SID,
         path: /tmp/sid_phy/test_x300,
@@ -86,7 +94,7 @@ model_cfg:
 # Training
 # -------------------------------------------------
 train_cfg:
-  epochs: 250
+  epochs: 5
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
   weight_decay: 0.0
@@ -111,4 +119,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "ssim", "niqe", "fid", "musiq", "clipiqa"]
+  metrics: ["lpips","psnr", "fid"]

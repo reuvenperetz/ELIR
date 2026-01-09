@@ -66,6 +66,28 @@ class IRSetup(L.LightningModule):
         if self.ema:
             self.ema.update(self.model)
 
+    def on_train_epoch_start(self):
+        """Called at the start of each training epoch."""
+        # Update dataset's epoch for dynamic patch size scheduling
+        if self.trainer and self.trainer.train_dataloader:
+            train_dataloader = self.trainer.train_dataloader
+            dataset = None
+
+            # Get the dataset from the dataloader
+            if hasattr(train_dataloader, 'dataset'):
+                dataset = train_dataloader.dataset
+            elif hasattr(train_dataloader, 'loaders'):
+                # CombinedLoader case
+                loaders = train_dataloader.loaders
+                if isinstance(loaders, list) and len(loaders) > 0:
+                    dataset = loaders[0].dataset if hasattr(loaders[0], 'dataset') else None
+                elif hasattr(loaders, 'dataset'):
+                    dataset = loaders.dataset
+
+            # Update epoch on dataset if it supports set_epoch
+            if dataset is not None and hasattr(dataset, 'set_epoch'):
+                dataset.set_epoch(self.current_epoch)
+
     def training_step(self, batch, batch_idx):
         x_lq, x_hq = batch[0], batch[1]
         # Print input shape for each rank (useful for DDP debugging)

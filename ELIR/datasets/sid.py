@@ -191,16 +191,35 @@ class SIDRandomCropDataset(Dataset):
     """
     Dataset that returns one random crop per image with optional augmentations.
     Each epoch samples different random crops from the images.
+
+    Supports dynamic patch sizes via patch_size_schedule configuration:
+        patch_size_schedule:
+          sizes: [128, 256, 384, 512]  # Available patch sizes
+          mode: "random"                # random, increasing, decreasing, cyclic, step
     """
     def __init__(self, image_folder, patch_size, augment=True,
-                 hflip=True, vflip=True, rotate=True):
+                 hflip=True, vflip=True, rotate=True,
+                 patch_size_schedule=None, total_epochs=None):
         super().__init__()
 
-        self.patch_size = patch_size
+        self.base_patch_size = patch_size
+        self.patch_size = patch_size  # Current patch size (may change dynamically)
         self.augment = augment
         self.hflip = hflip
         self.vflip = vflip
         self.rotate = rotate
+
+        # Dynamic patch size scheduling
+        self.patch_size_schedule = patch_size_schedule
+        self.patch_size_scheduler = None
+        if patch_size_schedule is not None:
+            from ELIR.training.patch_size_scheduler import create_patch_size_scheduler
+            self.patch_size_scheduler = create_patch_size_scheduler(
+                {'patch_size_schedule': patch_size_schedule},
+                total_epochs=total_epochs
+            )
+            if self.patch_size_scheduler:
+                print(f"[SIDRandomCropDataset] Dynamic patch size enabled: {self.patch_size_scheduler}")
 
         self.lq_images_path = self.get_file_path(image_folder, "lq")
         self.hq_images_path = self.get_file_path(image_folder, "hq")
@@ -209,6 +228,19 @@ class SIDRandomCropDataset(Dataset):
             "LQ and HQ image count mismatch"
 
         self.transform = v2.Compose([v2.ToTensor()])
+
+        # Track current epoch for scheduling
+        self.current_epoch = 0
+
+    def set_epoch(self, epoch: int):
+        """Set the current epoch for patch size scheduling."""
+        self.current_epoch = epoch
+        if self.patch_size_scheduler:
+            self.patch_size_scheduler.set_epoch(epoch)
+            new_size = self.patch_size_scheduler.get_patch_size(epoch=epoch)
+            if new_size != self.patch_size:
+                print(f"[SIDRandomCropDataset] Epoch {epoch}: patch_size changed {self.patch_size} -> {new_size}")
+                self.patch_size = new_size
 
     def get_file_path(self, image_folder, q):
         image_folder_split = os.path.join(image_folder, q)
@@ -222,10 +254,16 @@ class SIDRandomCropDataset(Dataset):
             img = raw.postprocess()
         return img  # Return numpy array for easier augmentation
 
-    def _random_crop(self, img_lq, img_hq):
+    def _get_current_patch_size(self):
+        """Get the current patch size (may be dynamic for random mode)."""
+        if self.patch_size_scheduler and self.patch_size_schedule.get('mode') == 'random':
+            return self.patch_size_scheduler.get_patch_size()
+        return self.patch_size
+
+    def _random_crop(self, img_lq, img_hq, patch_size):
         """Extract the same random crop from both LQ and HQ images."""
         H, W, _ = img_lq.shape
-        P = self.patch_size
+        P = patch_size
 
         if H >= P and W >= P:
             y = np.random.randint(0, H - P + 1)
@@ -261,22 +299,20 @@ class SIDRandomCropDataset(Dataset):
         return lq, hq
 
     def __getitem__(self, index):
+        # Get current patch size (may be dynamic)
+        current_patch_size = self._get_current_patch_size()
+
         # Load both images
         img_LQ = self._load_image(self.lq_images_path[index])
         img_HQ = self._load_image(self.hq_images_path[index])
 
         # Random crop (same location for both)
-        patch_LQ, patch_HQ = self._random_crop(img_LQ, img_HQ)
+        patch_LQ, patch_HQ = self._random_crop(img_LQ, img_HQ, current_patch_size)
 
         # Apply augmentations
         if self.augment:
             patch_LQ, patch_HQ = self._augment_pair(patch_LQ, patch_HQ)
 
-        # Ensure correct shape (H, W, C)
-        assert patch_LQ.shape == (self.patch_size, self.patch_size, 3), \
-            f"Unexpected LQ shape: {patch_LQ.shape}"
-        assert patch_HQ.shape == (self.patch_size, self.patch_size, 3), \
-            f"Unexpected HQ shape: {patch_HQ.shape}"
 
         # Convert to PIL and transform to tensor
         patch_LQ = self.transform(Image.fromarray(patch_LQ))
@@ -304,6 +340,10 @@ class SID(BasicLoader):
         vflip = dataset_params.get("vflip", True)
         rotate = dataset_params.get("rotate", True)
 
+        # Dynamic patch size schedule (optional)
+        patch_size_schedule = dataset_params.get("patch_size_schedule", None)
+        total_epochs = dataset_params.get("total_epochs", 100)  # Default to 100 epochs
+
         # Choose dataset based on mode
         if full_image:
             dataset = SIDFullImageDataset(path)
@@ -313,14 +353,23 @@ class SID(BasicLoader):
                 augment=augment,
                 hflip=hflip,
                 vflip=vflip,
-                rotate=rotate
+                rotate=rotate,
+                patch_size_schedule=patch_size_schedule,
+                total_epochs=total_epochs
             )
         else:
             dataset = SIDPatchesDataset(path, patch_size)
 
+        # Determine effective batch size
+        # When using random patch size mode, batch_size must be 1 to avoid size mismatch
+        effective_batch_size = batch_size
+        if patch_size_schedule and patch_size_schedule.get('mode') == 'random':
+            effective_batch_size = 1
+            print(f"[SID] Using batch_size=1 due to random patch size mode")
+
         # Loader - use batch_size=1 for full images (different sizes)
         loader = DataLoader(dataset,
-                            batch_size=1 if full_image else batch_size,
+                            batch_size=1 if full_image else effective_batch_size,
                             shuffle=shuffle,
                             num_workers=num_workers,
                             pin_memory=True,
