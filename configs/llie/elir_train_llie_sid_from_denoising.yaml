@@ -94,7 +94,7 @@ model_cfg:
 # Training
 # -------------------------------------------------
 train_cfg:
-  epochs: 5
+  epochs: 250
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
   weight_decay: 0.0
