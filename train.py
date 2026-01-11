@@ -124,7 +124,7 @@ def run_train(conf):
                         default_root_dir = run_dir,
                         callbacks=checkpoint,
                         # strategy = "ddp",
-                        devices = "auto",
+                        devices = 1,
                         accelerator="gpu",
                         logger = mlflow_logger,
                         num_sanity_val_steps=train_cfg.get("num_sanity_val_steps",0),
