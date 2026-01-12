@@ -53,7 +53,14 @@ def set_nested_value(conf, key_path, value):
             value = True
         elif value.lower() == "false":
             value = False
-        elif value.isdigit():
+        # Check for list syntax: [item1,item2,...]
+        elif value.startswith("[") and value.endswith("]"):
+            import ast
+            try:
+                value = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                pass  # Keep as string if parsing fails
+        elif value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
             value = int(value)
         else:
             try:
