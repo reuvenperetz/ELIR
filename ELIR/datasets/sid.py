@@ -12,6 +12,72 @@ from PIL import Image
 from ELIR.training.patch_tracker import PatchTracker
 
 
+
+def basic_raw_post_process(raw, amplification_ratio=1.0):
+    """
+    Basic RAW post-processing inspired by the SID paper.
+    - Packs Bayer array into 4 channels
+    - Subtracts black level
+    - Scales by amplification ratio
+    - Simple demosaicing to 3-channel RGB at full resolution
+    """
+    # Pack Bayer array into 4 channels
+    raw_image = raw.raw_image_visible.astype(np.float32)
+    H, W = raw_image.shape
+    raw_packed = np.zeros((H // 2, W // 2, 4), dtype=np.float32)
+
+    # RGGB pattern
+    raw_packed[..., 0] = raw_image[0::2, 0::2]
+    raw_packed[..., 1] = raw_image[0::2, 1::2]
+    raw_packed[..., 2] = raw_image[1::2, 0::2]
+    raw_packed[..., 3] = raw_image[1::2, 1::2]
+
+    # Subtract black level and scale
+    black_level = np.array(raw.black_level_per_channel).mean()
+    raw_packed = (raw_packed - black_level) * amplification_ratio
+
+    # Simple demosaicing to full resolution 3-channel RGB
+    # Average the two green channels
+    r, g1, g2, b = [raw_packed[..., i] for i in range(4)]
+    g = (g1 + g2) / 2.0
+
+    # Upsample each channel to full resolution
+    r_full = np.array(Image.fromarray(r).resize((W, H), Image.Resampling.BILINEAR))
+    g_full = np.array(Image.fromarray(g).resize((W, H), Image.Resampling.BILINEAR))
+    b_full = np.array(Image.fromarray(b).resize((W, H), Image.Resampling.BILINEAR))
+
+    # Stack to form RGB image
+    rgb_image = np.stack([r_full, g_full, b_full], axis=-1)
+
+    return np.clip(rgb_image, 0, 65535).astype(np.float32)
+
+
+def load_raw_image(path, raw_processing_mode='full', amplification_ratio=1.0):
+    """
+    Load RAW image with specified processing mode.
+
+    Args:
+        path: Path to RAW file
+        raw_processing_mode: 'basic' or 'full'
+            - 'basic': SID-style processing (subtract black level, scale, simple demosaic)
+            - 'full': Full rawpy postprocess
+        amplification_ratio: Amplification ratio for basic mode
+
+    Returns:
+        numpy array of shape (H, W, 3) with uint8 values in range [0, 255]
+    """
+    with rawpy.imread(path) as raw:
+        if raw_processing_mode == 'full':
+            img = raw.postprocess()
+        elif raw_processing_mode == 'basic':  # 'basic'
+            img = basic_raw_post_process(raw, amplification_ratio)
+            # Normalize to 0-255 for consistency with full mode
+            img = (img / 65535.0 * 255).astype(np.uint8)
+        else:
+            raise NotImplementedError
+    return img
+
+
 class SIDDataset(Dataset):
     def __init__(self, image_folder, patch_size):
         super(SIDDataset, self).__init__()
@@ -74,10 +140,12 @@ class SIDFullImageDataset(Dataset):
 
     Supports deduplicated HQ images via mapping.json file.
     """
-    def __init__(self, image_folder):
+    def __init__(self, image_folder, raw_processing_mode='full', amplification_ratio=1.0):
         super().__init__()
 
         self.image_folder = image_folder
+        self.raw_processing_mode = raw_processing_mode
+        self.amplification_ratio = amplification_ratio
 
         # Check for mapping file (deduplicated HQ images)
         self.mapping = None
@@ -123,8 +191,7 @@ class SIDFullImageDataset(Dataset):
         return len(self.lq_images_path)
 
     def _load_image(self, path):
-        with rawpy.imread(path) as raw:
-            img = raw.postprocess()
+        img = load_raw_image(path, self.raw_processing_mode, self.amplification_ratio)
         return Image.fromarray(img)
 
     def __getitem__(self, index):
@@ -141,11 +208,13 @@ class SIDPatchesDataset(Dataset):
     Dataset that extracts all patches from images.
     Supports deduplicated HQ images via mapping.json file.
     """
-    def __init__(self, image_folder, patch_size):
+    def __init__(self, image_folder, patch_size, raw_processing_mode='full', amplification_ratio=1.0):
         super().__init__()
 
         self.image_folder = image_folder
         self.patch_size = patch_size
+        self.raw_processing_mode = raw_processing_mode
+        self.amplification_ratio = amplification_ratio
 
         # Check for mapping file (deduplicated HQ images)
         self.mapping = None
@@ -205,8 +274,7 @@ class SIDPatchesDataset(Dataset):
         patches = []
 
         for img_idx, img_path in enumerate(self.lq_images_path):
-            with rawpy.imread(img_path) as raw:
-                img = raw.postprocess()
+            img = load_raw_image(img_path, self.raw_processing_mode, self.amplification_ratio)
 
             H, W, _ = img.shape
             P = self.patch_size
@@ -230,8 +298,7 @@ class SIDPatchesDataset(Dataset):
         return len(self.patches)
 
     def _load_image(self, path):
-        with rawpy.imread(path) as raw:
-            img = raw.postprocess()
+        img = load_raw_image(path, self.raw_processing_mode, self.amplification_ratio)
         return Image.fromarray(img)
 
     def __getitem__(self, index):
@@ -267,7 +334,8 @@ class SIDRandomCropDataset(Dataset):
     """
     def __init__(self, image_folder, patch_size, augment=True,
                  hflip=True, vflip=True, rotate=True,
-                 patch_size_schedule=None, total_epochs=None):
+                 patch_size_schedule=None, total_epochs=None,
+                 raw_processing_mode='full', amplification_ratio=1.0):
         super().__init__()
 
         self.image_folder = image_folder
@@ -277,6 +345,8 @@ class SIDRandomCropDataset(Dataset):
         self.hflip = hflip
         self.vflip = vflip
         self.rotate = rotate
+        self.raw_processing_mode = raw_processing_mode
+        self.amplification_ratio = amplification_ratio
 
         # Dynamic patch size scheduling
         self.patch_size_schedule = patch_size_schedule
@@ -349,8 +419,7 @@ class SIDRandomCropDataset(Dataset):
         return len(self.lq_images_path)
 
     def _load_image(self, path):
-        with rawpy.imread(path) as raw:
-            img = raw.postprocess()
+        img = load_raw_image(path, self.raw_processing_mode, self.amplification_ratio)
         return img  # Return numpy array for easier augmentation
 
     def _get_current_patch_size(self):
@@ -443,9 +512,19 @@ class SID(BasicLoader):
         patch_size_schedule = dataset_params.get("patch_size_schedule", None)
         total_epochs = dataset_params.get("total_epochs", 100)  # Default to 100 epochs
 
+        # RAW processing options
+        # 'full': Full rawpy postprocess (default)
+        # 'basic': SID-style processing (subtract black level, scale, simple demosaic)
+        raw_processing_mode = dataset_params.get("raw_processing_mode", "full")
+        amplification_ratio = dataset_params.get("amplification_ratio", 1.0)
+
         # Choose dataset based on mode
         if full_image:
-            dataset = SIDFullImageDataset(path)
+            dataset = SIDFullImageDataset(
+                path,
+                raw_processing_mode=raw_processing_mode,
+                amplification_ratio=amplification_ratio
+            )
         elif random_crop:
             dataset = SIDRandomCropDataset(
                 path, patch_size,
@@ -454,10 +533,16 @@ class SID(BasicLoader):
                 vflip=vflip,
                 rotate=rotate,
                 patch_size_schedule=patch_size_schedule,
-                total_epochs=total_epochs
+                total_epochs=total_epochs,
+                raw_processing_mode=raw_processing_mode,
+                amplification_ratio=amplification_ratio
             )
         else:
-            dataset = SIDPatchesDataset(path, patch_size)
+            dataset = SIDPatchesDataset(
+                path, patch_size,
+                raw_processing_mode=raw_processing_mode,
+                amplification_ratio=amplification_ratio
+            )
 
         # Determine effective batch size
         # When using random patch size mode, batch_size must be 1 to avoid size mismatch
