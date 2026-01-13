@@ -1,9 +1,39 @@
 import os
 import shutil
 import json
+import re
 from pathlib import Path
 from tqdm import tqdm
 from collections import defaultdict
+
+
+def extract_exposure_time(filename):
+    """
+    Extract exposure time from SID filename.
+    E.g., '10003_00_0.1s.ARW' -> 0.1
+          '10003_00_10s.ARW' -> 10.0
+    """
+    # Match patterns like 0.1s, 10s, 0.04s, etc.
+    match = re.search(r'_(\d+(?:\.\d+)?)s\.ARW$', filename, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def compute_amplification_ratio(short_path, long_path):
+    """
+    Compute amplification ratio from exposure times in filenames.
+    Ratio = long_exposure / short_exposure
+    """
+    short_filename = os.path.basename(short_path)
+    long_filename = os.path.basename(long_path)
+
+    short_exp = extract_exposure_time(short_filename)
+    long_exp = extract_exposure_time(long_filename)
+
+    if short_exp is not None and long_exp is not None and short_exp > 0:
+        return long_exp / short_exp
+    return None
 
 
 def parse_list_file(list_path, is_physics_format=False):
@@ -11,6 +41,8 @@ def parse_list_file(list_path, is_physics_format=False):
     Parse SID list file.
     Original format: ./Sony/short/10003_00_0.1s.ARW ./Sony/long/10003_00_10s.ARW ISO200 F8
     Physics format: 10003_00_0.1s 10003_00_10s 100 (filenames + ratio)
+
+    Returns list of tuples: (short_path, long_path, amplification_ratio)
     """
     pairs = []
     with open(list_path, "r") as f:
@@ -23,7 +55,7 @@ def parse_list_file(list_path, is_physics_format=False):
             if is_physics_format:
                 short_name = parts[0]
                 long_name = parts[1]
-                ratio = int(parts[2]) if len(parts) > 2 else None
+                ratio = float(parts[2]) if len(parts) > 2 else None
 
                 if not short_name.endswith(".ARW"):
                     short_name += ".ARW"
@@ -31,11 +63,18 @@ def parse_list_file(list_path, is_physics_format=False):
                     long_name += ".ARW"
                 short_path = f"Sony/short/{short_name}"
                 long_path = f"Sony/long/{long_name}"
+
+                # If ratio not provided, compute from exposure times
+                if ratio is None:
+                    ratio = compute_amplification_ratio(short_path, long_path)
+
                 pairs.append((short_path, long_path, ratio))
             else:
                 short_path = parts[0].lstrip("./")
                 long_path = parts[1].lstrip("./")
-                pairs.append((short_path, long_path, None))
+                # Compute ratio from exposure times in filenames
+                ratio = compute_amplification_ratio(short_path, long_path)
+                pairs.append((short_path, long_path, ratio))
 
     return pairs
 
@@ -90,17 +129,19 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
                 all_pairs.extend(pairs)
                 print(f"  Loaded {len(pairs)} pairs from {list_file}")
 
-        # Remove duplicates
+        # Remove duplicates (keep first occurrence with its ratio)
         seen = set()
         unique_pairs = []
-        for short_path, long_path, _ in all_pairs:
+        pair_to_ratio = {}  # Map (short, long) -> ratio
+        for short_path, long_path, ratio in all_pairs:
             if (short_path, long_path) not in seen:
                 seen.add((short_path, long_path))
-                unique_pairs.append((short_path, long_path))
+                unique_pairs.append((short_path, long_path, ratio))
+                pair_to_ratio[(short_path, long_path)] = ratio
         print(f"Total unique pairs: {len(unique_pairs)}")
 
-        # Train is everything not in test
-        train_pairs = [(s, l) for s, l in unique_pairs if (s, l) not in test_pairs_set]
+        # Train is everything not in test (preserve ratios)
+        train_pairs = [(s, l, r) for s, l, r in unique_pairs if (s, l) not in test_pairs_set]
 
         print(f"\nPhysics partition:")
         print(f"  Train: {len(train_pairs)} pairs")
@@ -108,9 +149,11 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
             print(f"  Test x{ratio}: {len(pairs)} pairs")
 
         # Build splits dict: train + test_x100, test_x250, test_x300
+        # All entries are now (short_path, long_path, ratio) tuples
         splits = {"train": train_pairs}
         for ratio, pairs in test_by_ratio.items():
-            splits[f"test_x{ratio}"] = pairs
+            # Add ratio to each pair in test splits
+            splits[f"test_x{int(ratio)}"] = [(s, l, ratio) for s, l in pairs]
 
     else:
         # Original SID partition
@@ -135,7 +178,8 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
                     print(f"⚠️  List file not found: {list_path}")
                     continue
                 pairs = parse_list_file(list_path)
-                all_pairs.extend([(p[0], p[1]) for p in pairs])
+                # Keep full tuple (short, long, ratio)
+                all_pairs.extend(pairs)
                 print(f"  Loaded {len(pairs)} pairs from {list_file}")
             splits[split_name] = all_pairs
 
@@ -150,16 +194,17 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
         lq_dir.mkdir(parents=True, exist_ok=True)
         hq_dir.mkdir(parents=True, exist_ok=True)
 
-        # Group LQ images by their HQ counterpart
+        # Group LQ images by their HQ counterpart, preserving ratio info
+        # hq_to_lq[long_rel] = [(short_rel, ratio), ...]
         hq_to_lq = defaultdict(list)
-        for short_rel, long_rel in pairs:
-            hq_to_lq[long_rel].append(short_rel)
+        for short_rel, long_rel, ratio in pairs:
+            hq_to_lq[long_rel].append((short_rel, ratio))
 
         print(f"  Total pairs: {len(pairs)}")
         print(f"  Unique HQ images: {len(hq_to_lq)}")
         print(f"  Space savings: {len(pairs) - len(hq_to_lq)} fewer HQ copies")
 
-        # Mapping: lq_filename -> hq_filename
+        # Mapping: lq_filename -> {"hq": hq_filename, "amplification_ratio": ratio}
         mapping = {}
         missing = []
         lq_copied = 0
@@ -180,7 +225,7 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
             hq_copied += 1
 
             # Copy all corresponding LQ images
-            for lq_idx, short_rel in enumerate(short_list):
+            for lq_idx, (short_rel, ratio) in enumerate(short_list):
                 short_path = archive_path / short_rel
 
                 if not short_path.exists():
@@ -193,8 +238,13 @@ def arrange_sid_dataset_dedup(archive_path, output_path, list_dir, no_val=False,
                 shutil.copy2(short_path, lq_dir / lq_filename)
                 lq_copied += 1
 
-                # Add to mapping
-                mapping[lq_filename] = hq_filename
+                # Add to mapping with amplification ratio and original filenames for documentation
+                mapping[lq_filename] = {
+                    "hq": hq_filename,
+                    "amplification_ratio": ratio,
+                    "original_lq": os.path.basename(short_rel),
+                    "original_hq": os.path.basename(long_rel)
+                }
 
         # Save mapping file
         mapping_path = output_path / split_name / "mapping.json"
