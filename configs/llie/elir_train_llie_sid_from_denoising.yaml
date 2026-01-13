@@ -22,6 +22,9 @@ dataset_cfg:
                    random_crop: true,
                    augment: true,
                    lq_raw_postprocessing_mode: basic,
+#                   patch_size_schedule: {sizes: [ 128, 256, 512, 1024 ],
+#                                         mode: increasing},
+#                   total_epochs: 250, # !!!! MAKE SURE THIS MATCHES train_cfg.epochs
                    shuffle: true}
   val_datasets:
     - { name: SID,
@@ -99,7 +102,7 @@ model_cfg:
 # Training
 # -------------------------------------------------
 train_cfg:
-  epochs: 250
+  epochs: 250 #  !!!! MAKE SURE THIS MATCHES dataset_cfg.train_dataset.total_epochs
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
   weight_decay: 0.0
