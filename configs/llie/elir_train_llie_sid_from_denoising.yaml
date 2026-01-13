@@ -109,7 +109,7 @@ train_cfg:
   optimizer_params: {}
   ema_decay: 0.999
   max_steps: -1 # run only several steps
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 3
   num_sanity_val_steps: 2
   wandb: False
   mlflow: True
