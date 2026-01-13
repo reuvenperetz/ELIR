@@ -93,10 +93,18 @@ class IRSetup(L.LightningModule):
         # Print input shape for each rank (useful for DDP debugging)
         rank = self.global_rank if hasattr(self, 'global_rank') else 0
         print(f"[Rank {rank}] Train batch {batch_idx} - x_lq: {x_lq.shape}, x_hq: {x_hq.shape}")
-        # Loss function
-        loss = get_loss(self.model, x_hq, x_lq, self.fm_cfg, self.tmodel)
-        self.log("train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        return loss
+        # Loss function - now returns a dict of loss components
+        loss_dict = get_loss(self.model, x_hq, x_lq, self.fm_cfg, self.tmodel)
+
+        # Log total loss
+        self.log("train_loss_total", loss_dict['loss_total'], on_epoch=True, prog_bar=True, logger=True)
+
+        # Log individual loss components
+        for name, value in loss_dict.items():
+            if name != 'loss_total':
+                self.log(f"train_{name}", value, on_epoch=True, prog_bar=False, logger=True)
+
+        return loss_dict['loss_total']
 
 
     def compute_metrics(self, x_hq_hat, x_hq, dataloader_idx=0):

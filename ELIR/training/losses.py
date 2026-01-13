@@ -240,12 +240,12 @@ def l2_cfm_mse_loss(model, x_hq, x_lq, fm_cfg, tmodel):
     dt = fm_cfg.get("dt", 0.05)
     beta = fm_cfg.get("beta", 0.001)
 
-    # L2 loss
+    # L2 loss (latent space MMSE)
     with torch.no_grad():
         X_hq = tmodel.encoder(x_hq)
     X_lq = model.enc(x_lq)
     X_mmse = model.mmse(X_lq)
-    loss = F.mse_loss(X_hq, X_mmse)
+    loss_latent_mse = F.mse_loss(X_hq, X_mmse)
 
     # Flow Loss
     bs = x_hq.shape[0]
@@ -271,16 +271,29 @@ def l2_cfm_mse_loss(model, x_hq, x_lq, fm_cfg, tmodel):
     f0 = Xt + (seg_ends - t) * v0
     r_less = r < seg_ends
     f0_ = r_less*(Xr + (seg_ends - r) * v0_) + (~r_less) * X_ends
-    loss += (1-beta)*(F.mse_loss(f0, f0_) + alpha * F.mse_loss(v0, v0_))
 
-    # MSE loss
+    loss_cfm_f = F.mse_loss(f0, f0_)
+    loss_cfm_v = F.mse_loss(v0, v0_)
+
+    loss_flow = (1-beta)*(loss_cfm_f + alpha * loss_cfm_v)
+
+    # MSE loss (pixel space reconstruction)
     f1 = f0.detach()
     v1 = model.fmir(f1, pos_emb(seg_ends, t_dim))
     X1 = f1 + (1 - seg_ends) * v1
     x_hq_hat = tmodel.decoder(X1)
-    loss += beta*F.mse_loss(x_hq, x_hq_hat)
+    loss_pixel_space_mse = F.mse_loss(x_hq, x_hq_hat)
 
-    return loss
+    # Weighted total loss
+    total_loss = loss_latent_mse + loss_flow + beta * loss_pixel_space_mse
+
+    return {
+        'loss_total': total_loss,
+        'loss_latent_mse': loss_latent_mse,
+        'loss_cfm_f': loss_cfm_f,
+        'loss_cfm_v': loss_cfm_v,
+        'loss_pixel_space_mse': loss_pixel_space_mse
+    }
 
 
 def get_loss(model, x_hq, x_lq, fm_cfg, tmodel=None):
