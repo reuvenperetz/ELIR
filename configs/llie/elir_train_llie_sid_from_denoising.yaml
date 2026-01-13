@@ -21,8 +21,7 @@ dataset_cfg:
                    num_workers: 16,
                    random_crop: true,
                    augment: true,
-                   amplification_ratio: 1,
-                   raw_processing_mode: basic,
+                   lq_raw_postprocessing_mode: basic,
                    shuffle: true}
   val_datasets:
     - { name: SID,
@@ -34,8 +33,7 @@ dataset_cfg:
         random_crop: false,
         shuffle: false,
         full_image: true,      # Use entire images for validation
-        amplification_ratio: 300, # not in use, for clarity
-        raw_processing_mode: full
+        lq_raw_postprocessing_mode: basic
 
     }
     - { name: SID,
@@ -47,8 +45,7 @@ dataset_cfg:
         random_crop: false,
         shuffle: false,
         full_image: true,      # Use entire images for validation
-        amplification_ratio: 250,
-        raw_processing_mode: full
+        lq_raw_postprocessing_mode: basic
     }
     - { name: SID,
         path: /tmp/sid_phy_dedup/test_x100,
@@ -59,8 +56,7 @@ dataset_cfg:
         random_crop: false,
         shuffle: false,
         full_image: true,      # Use entire images for validation
-        amplification_ratio: 100,
-        raw_processing_mode: full
+        lq_raw_postprocessing_mode: basic
     }
 
 # -------------------------------------------------
@@ -128,4 +124,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "fid"]
+  metrics: ["lpips","psnr", "fid", "ssim", "niqe"]
