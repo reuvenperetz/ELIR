@@ -14,7 +14,7 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: SID,
-                   path: /tmp/sid_dedup/train,
+                   path: /tmp/sid_phy_dedup/train,
                    task: llie,
                    batch_size: 32,
                    patch_size: 256,
@@ -28,7 +28,7 @@ dataset_cfg:
                    shuffle: true}
   val_datasets:
     - { name: SID,
-        path: /tmp/sid_dedup/test,
+        path: /tmp/sid_phy_dedup/test_x300,
         task: llie,
         batch_size: 16,
         patch_size: 256,
@@ -38,6 +38,28 @@ dataset_cfg:
         full_image: true,      # Use entire images for validation
         lq_raw_postprocessing_mode: basic
 
+    }
+    - { name: SID,
+        path: /tmp/sid_phy_dedup/test_x250,
+        task: llie,
+        batch_size: 16,
+        patch_size: 256,
+        num_workers: 16,
+        random_crop: false,
+        shuffle: false,
+        full_image: true,      # Use entire images for validation
+        lq_raw_postprocessing_mode: basic
+    }
+    - { name: SID,
+        path: /tmp/sid_phy_dedup/test_x100,
+        task: llie,
+        batch_size: 16,
+        patch_size: 256,
+        num_workers: 16,
+        random_crop: false,
+        shuffle: false,
+        full_image: true,      # Use entire images for validation
+        lq_raw_postprocessing_mode: basic
     }
 
 # -------------------------------------------------
