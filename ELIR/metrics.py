@@ -26,7 +26,7 @@ class MetricEval(object):
             self.evaluater.to(device)
         elif metric in ["fid", "fid-f"]:
             # Directories will be created per dataloader_idx in _ensure_dl_idx
-            self.evaluater = pyiqa.create_metric('fid', device=device, dims=64)
+            self.evaluater = pyiqa.create_metric('fid', device=device)
         elif metric == "lpips":
             self.evaluater = pyiqa.create_metric(metric, device=device, net="vgg")
         elif metric == "save":
