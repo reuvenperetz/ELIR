@@ -15,40 +15,31 @@ def load_raw_image(path, mode='full', amplification_ratio=1.0):
 
     Args:
         path: Path to RAW file
-        mode: 'full' (rawpy postprocess) or 'basic' (SID-style)
-        amplification_ratio: Scale factor for basic mode
+        mode: 'full' (rawpy postprocess with all enhancements) or
+              'basic' (rawpy postprocess with only black level subtraction and brightness/gamma)
+        amplification_ratio: Brightness multiplier for basic mode
 
     Returns:
         numpy array (H, W, 3) with uint8 values [0, 255]
     """
     with rawpy.imread(path) as raw:
         if mode == 'full':
+            # Full postprocessing with all enhancements (white balance, color correction, etc.)
             return raw.postprocess()
         elif mode == 'basic':
-            # Pack Bayer into 4 channels
-            raw_image = raw.raw_image_visible.astype(np.float32)
-            H, W = raw_image.shape
-            raw_packed = np.zeros((H // 2, W // 2, 4), dtype=np.float32)
-            raw_packed[..., 0] = raw_image[0::2, 0::2]  # R
-            raw_packed[..., 1] = raw_image[0::2, 1::2]  # G1
-            raw_packed[..., 2] = raw_image[1::2, 0::2]  # G2
-            raw_packed[..., 3] = raw_image[1::2, 1::2]  # B
-
-            # Subtract black level and scale
-            black_level = np.array(raw.black_level_per_channel)
-            raw_packed = (raw_packed - black_level) * amplification_ratio
-
-            # Simple demosaicing: average greens, upsample to full res
-            r, g1, g2, b = [raw_packed[..., i] for i in range(4)]
-            g = (g1 + g2) / 2.0
-
-            r_full = np.array(Image.fromarray(r).resize((W, H), Image.Resampling.BILINEAR))
-            g_full = np.array(Image.fromarray(g).resize((W, H), Image.Resampling.BILINEAR))
-            b_full = np.array(Image.fromarray(b).resize((W, H), Image.Resampling.BILINEAR))
-
-            rgb = np.stack([r_full, g_full, b_full], axis=-1)
-            rgb = np.clip(rgb, 0, 65535)
-            return (rgb / 65535.0 * 255.0).astype(np.uint8)
+            # Minimal postprocessing: only demosaic + black level subtraction + brightness
+            # No white balance, no color correction, no auto-brightness
+            return raw.postprocess(
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.LINEAR,  # Fast linear interpolation
+                use_camera_wb=False,      # No white balance
+                use_auto_wb=False,        # No auto white balance
+                no_auto_bright=True,      # No auto brightness
+                no_auto_scale=True,       # No auto scaling
+                output_color=rawpy.ColorSpace.raw,  # No color space conversion
+                output_bps=16,            # 16-bit output for precision
+                bright=amplification_ratio,  # Apply amplification as brightness multiplier
+                gamma=(1, 1),             # Linear gamma (no gamma correction)
+            )
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
