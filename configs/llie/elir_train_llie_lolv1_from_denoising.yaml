@@ -102,4 +102,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "fid", "ssim", "niqe", "musiq"]
+  metrics: ["lpips","psnr", "fid", "ssim", "musiq"]
