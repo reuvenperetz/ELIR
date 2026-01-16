@@ -35,6 +35,9 @@ def get_loader(ds_params):
     elif ds_name == "SID":
         from ELIR.datasets.sid import SID
         dl = SID().create_loaders(ds_params)
+    elif ds_name == "LOLv1":
+        from ELIR.datasets.lolv1 import LOLv1
+        dl = LOLv1().create_loaders(ds_params)
     else:
         raise Exception("Dataset is unknown!")
 
