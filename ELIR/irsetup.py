@@ -122,7 +122,14 @@ class IRSetup(L.LightningModule):
             return self.model.inference(x)
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        x_lq, y = batch
+        # Handle both formats: (lq, hq) for training and (lq, hq, orig_dims) for validation with padding
+        if len(batch) == 3:
+            x_lq, y, orig_dims = batch
+            # orig_dims is (B, 2) tensor with [orig_h, orig_w] for each sample
+        else:
+            x_lq, y = batch
+            orig_dims = None
+
         # Print input shape for each rank (useful for DDP debugging)
         rank = self.global_rank if hasattr(self, 'global_rank') else 0
         print(f"[Rank {rank}] Val dataloader {dataloader_idx} batch {batch_idx} - x_lq: {x_lq.shape}, y: {y.shape}")
@@ -150,6 +157,14 @@ class IRSetup(L.LightningModule):
             y_hat = patch_spliter.gather()
         else:
             y_hat = self.infer(x_lq)
+
+        # Crop predictions and ground truth back to original dimensions if padded
+        if orig_dims is not None:
+            # All images in batch should have same original size (LOLv1 is 400x600)
+            orig_h, orig_w = orig_dims[0, 0].item(), orig_dims[0, 1].item()
+            y_hat = y_hat[:, :, :orig_h, :orig_w]
+            y = y[:, :, :orig_h, :orig_w]
+            x_lq = x_lq[:, :, :orig_h, :orig_w]
 
         # Capture one sample per validation dataloader for MLflow image logging
         if batch_idx == 0 and dataloader_idx not in self.val_samples:

@@ -16,9 +16,25 @@ from ELIR.datasets.dataset import BasicLoader
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import v2
 import torch
+import torch.nn.functional as F
 import os
 import glob
 from PIL import Image
+
+
+def pad_to_multiple(tensor, multiple=16, mode='reflect'):
+    """
+    Pad a tensor (C, H, W) so that H and W are divisible by `multiple`.
+    Returns: (padded_tensor, original_h, original_w)
+    """
+    _, h, w = tensor.shape
+    pad_h = (multiple - h % multiple) % multiple
+    pad_w = (multiple - w % multiple) % multiple
+    if pad_h > 0 or pad_w > 0:
+        # F.pad expects (left, right, top, bottom) for 3D tensor with batch
+        # For (C, H, W), we need to add batch dim temporarily
+        tensor = F.pad(tensor.unsqueeze(0), (0, pad_w, 0, pad_h), mode=mode).squeeze(0)
+    return tensor, h, w
 
 
 class LOLv1Dataset(Dataset):
@@ -28,21 +44,24 @@ class LOLv1Dataset(Dataset):
     Supports:
     - Full images or random crops
     - Data augmentation (flips, rotations)
+    - Reflection padding for validation (to handle arbitrary image sizes)
     """
 
-    def __init__(self, image_folder, patch_size=256, full_image=False, augment=True):
+    def __init__(self, image_folder, patch_size=256, full_image=False, augment=True, is_val=False):
         """
         Args:
             image_folder: Path to dataset folder containing low/ and high/ subfolders
             patch_size: Size of random crops (ignored if full_image=True)
             full_image: If True, return full images; if False, return random crops
             augment: If True, apply random flips/rotations (only for crops)
+            is_val: If True, use reflection padding instead of resize for full images
         """
         super().__init__()
         self.image_folder = image_folder
         self.patch_size = patch_size
         self.full_image = full_image
         self.augment = augment
+        self.is_val = is_val
 
         # Get image paths
         lq_dir = os.path.join(image_folder, "low")
@@ -71,14 +90,12 @@ class LOLv1Dataset(Dataset):
             if lq_name != hq_name:
                 raise ValueError(f"Filename mismatch: {lq_name} vs {hq_name}")
 
-        # self.transform = v2.Compose([v2.ToTensor()])
-
-        # Resize to 512x512 for ELIR UNet compatibility
-        self.transform = v2.Compose([v2.Resize((512, 512),
-                                               interpolation=v2.InterpolationMode.BICUBIC),
-                                     v2.ToTensor()])
+        # Transform: just convert to tensor, padding/cropping handled in __getitem__
+        self.transform = v2.Compose([v2.ToTensor()])
 
         mode_str = 'full_image' if full_image else f'crop_{patch_size}'
+        if is_val:
+            mode_str += '_val_padded'
         print(f"[LOLv1Dataset] Loaded {len(self)} image pairs | mode={mode_str}")
 
     def __len__(self):
@@ -93,8 +110,17 @@ class LOLv1Dataset(Dataset):
         lq = self.transform(lq)
         hq = self.transform(hq)
 
-        if self.augment:
-            # Random crop using torch
+        if self.is_val:
+            # Validation mode: pad to multiple of 16 with reflection
+            # Return original dimensions for later cropping
+            orig_h, orig_w = lq.shape[1], lq.shape[2]
+            lq, _, _ = pad_to_multiple(lq, multiple=32, mode='reflect')
+            hq, _, _ = pad_to_multiple(hq, multiple=32, mode='reflect')
+            # Return tensors with original size info encoded
+            return lq, hq, torch.tensor([orig_h, orig_w])
+
+        elif self.augment:
+            # Training mode with augmentation: random crop
             _, H, W = lq.shape
             P = self.patch_size
 
@@ -144,7 +170,8 @@ class LOLv1(BasicLoader):
             image_folder=path,
             patch_size=patch_size,
             full_image=full_image,
-            augment=augment
+            augment=augment,
+            is_val=is_val
         )
 
         loader = DataLoader(
