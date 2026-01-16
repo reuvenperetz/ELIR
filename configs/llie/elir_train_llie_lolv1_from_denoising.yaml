@@ -14,7 +14,7 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: LOLv1,
-                   path: /Users/reuper01/Downloads/lol_dataset/our485,
+                   path: /tmp/lolv1_dataset/lol_dataset/our485,
                    task: llie,
                    batch_size: 32,
                    patch_size: 256,
@@ -25,7 +25,7 @@ dataset_cfg:
   }
   val_datasets:
     - { name: LOLv1,
-        path: /Users/reuper01/Downloads/lol_dataset/eval15,
+        path: /tmp/lolv1_dataset/lol_dataset/eval15,
         task: llie,
         batch_size: 16,
         patch_size: -1,   # Use full image size for validation
@@ -101,4 +101,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "fid"]
+  metrics: ["lpips","psnr", "fid", "ssim", "niqe", "musiq"]
