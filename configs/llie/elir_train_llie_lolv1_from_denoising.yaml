@@ -94,6 +94,7 @@ train_cfg:
   #   "mlflow" - save locally AND log to MLflow artifacts
   # Note: input/ground_truth saved once (first epoch), predictions saved every epoch
   image_logging_mode: local
+  save_every: 5
 
 
 

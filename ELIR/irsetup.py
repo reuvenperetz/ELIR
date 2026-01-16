@@ -186,8 +186,8 @@ class IRSetup(L.LightningModule):
                 suffix = f"_val{dl_idx}" if dl_idx > 0 else ""
                 self.log(f"{metric_eval.metric}{suffix}", result.item(), sync_dist=True, prog_bar=True)
 
-        # Log comparison images to MLflow
-        self._log_validation_images()
+        if self.current_epoch % self.eval_cfg.get("save_every", 1) == 0:
+            self._log_validation_images()
 
         # Clear samples for next epoch
         self.val_samples.clear()
