@@ -38,6 +38,12 @@ def get_loader(ds_params):
     elif ds_name == "LOLv1":
         from ELIR.datasets.lolv1 import LOLv1
         dl = LOLv1().create_loaders(ds_params)
+    elif ds_name == "LOLv2Real":
+        from ELIR.datasets.lolv2 import LOLv2Real
+        dl = LOLv2Real().create_loaders(ds_params)
+    elif ds_name == "LOLv2Synthetic":
+        from ELIR.datasets.lolv2 import LOLv2Synthetic
+        dl = LOLv2Synthetic().create_loaders(ds_params)
     else:
         raise Exception("Dataset is unknown!")
 

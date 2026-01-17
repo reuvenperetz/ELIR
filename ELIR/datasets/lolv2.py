@@ -23,9 +23,10 @@ import torch.nn.functional as F
 import os
 import glob
 from PIL import Image
+import re
 
 
-def pad_to_multiple(tensor, multiple=16, mode='reflect'):
+def pad_to_multiple(tensor, multiple=32, mode='reflect'):
     """
     Pad a tensor (C, H, W) so that H and W are divisible by `multiple`.
     Returns: (padded_tensor, original_h, original_w)
@@ -93,11 +94,17 @@ class LOLv2Dataset(Dataset):
         if len(self.lq_paths) == 0:
             raise ValueError(f"No images found in {lq_dir}")
 
-        # Verify filenames match
+        # Verify filenames match (LOLv2 uses different prefixes: low00001.png vs normal00001.png)
+        # Extract numeric part for comparison
+        def extract_id(filename):
+            """Extract numeric ID from filename like 'low00001.png' or 'normal00001.png'"""
+            match = re.search(r'(\d+)', filename)
+            return match.group(1) if match else filename
+
         for lq_path, hq_path in zip(self.lq_paths, self.hq_paths):
             lq_name = os.path.basename(lq_path)
             hq_name = os.path.basename(hq_path)
-            if lq_name != hq_name:
+            if lq_name != hq_name and extract_id(lq_name) != extract_id(hq_name):
                 raise ValueError(f"Filename mismatch: {lq_name} vs {hq_name}")
 
         # Transform: just convert to tensor, padding/cropping handled in __getitem__
@@ -124,8 +131,8 @@ class LOLv2Dataset(Dataset):
             # Validation mode: pad to multiple of 16 with reflection
             # Return original dimensions for later cropping
             orig_h, orig_w = lq.shape[1], lq.shape[2]
-            lq, _, _ = pad_to_multiple(lq, multiple=16, mode='reflect')
-            hq, _, _ = pad_to_multiple(hq, multiple=16, mode='reflect')
+            lq, _, _ = pad_to_multiple(lq, multiple=32, mode='reflect')
+            hq, _, _ = pad_to_multiple(hq, multiple=32, mode='reflect')
             # Return tensors with original size info encoded
             return lq, hq, torch.tensor([orig_h, orig_w])
 
