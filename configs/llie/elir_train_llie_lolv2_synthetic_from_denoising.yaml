@@ -14,7 +14,7 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: LOLv2Synthetic,
-                   path: /tmp/lolv2_dataset/Synthetic/Train,
+                   path: /tmp/lolv2_dataset/LOL-v2/Synthetic/Train,
                    task: llie,
                    batch_size: 32,
                    patch_size: 256,

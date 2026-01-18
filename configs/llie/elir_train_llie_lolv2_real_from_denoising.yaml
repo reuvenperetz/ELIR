@@ -14,7 +14,7 @@ env_cfg:
 # -------------------------------------------------
 dataset_cfg:
   train_dataset: { name: LOLv2Real,
-                   path: /tmp/lolv2_dataset/Real_captured/Train,
+                   path: /tmp/lolv2_dataset/LOL-v2/Real_captured/Train,
                    task: llie,
                    batch_size: 32,
                    patch_size: 256,
