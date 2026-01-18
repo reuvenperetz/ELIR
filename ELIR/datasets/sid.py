@@ -36,7 +36,7 @@ def load_raw_image(path, mode='full', amplification_ratio=1.0):
                 no_auto_bright=True,      # No auto brightness
                 no_auto_scale=True,       # No auto scaling
                 output_color=rawpy.ColorSpace.raw,  # No color space conversion
-                output_bps=16,            # 16-bit output for precision
+                # output_bps=16,            # 16-bit output for precision # TODO: temp disabled for compatibility with PIL: "TypeError: Cannot handle this data type: (1, 1, 3), <u2"
                 bright=amplification_ratio,  # Apply amplification as brightness multiplier
                 gamma=(1, 1),             # Linear gamma (no gamma correction)
             )
