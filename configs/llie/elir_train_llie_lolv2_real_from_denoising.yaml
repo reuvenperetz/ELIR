@@ -25,7 +25,7 @@ dataset_cfg:
   }
   val_datasets:
     - { name: LOLv2Real,
-        path: /tmp/lolv2_dataset/Real_captured/Test,
+        path: /tmp/lolv2_dataset/LOL-v2/Real_captured/Test,
         task: llie,
         batch_size: 16,
         patch_size: -1,   # Use full image size for validation

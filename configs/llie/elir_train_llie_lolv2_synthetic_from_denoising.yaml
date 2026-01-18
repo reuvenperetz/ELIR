@@ -25,7 +25,7 @@ dataset_cfg:
   }
   val_datasets:
     - { name: LOLv2Synthetic,
-        path: /tmp/lolv2_dataset/Synthetic/Test,
+        path: /tmp/lolv2_dataset/LOL-v2/Synthetic/Test,
         task: llie,
         batch_size: 16,
         patch_size: -1,   # Use full image size for validation
