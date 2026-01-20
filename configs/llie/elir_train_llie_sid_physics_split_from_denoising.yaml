@@ -67,7 +67,7 @@ dataset_cfg:
 # -------------------------------------------------
 fm_cfg:
   method: l2_cfm_mse_loss
-  k_steps: 5
+  k_steps: 3
   t_emb_dim: 160
   sigma_min: 0.00001
   sigma_s: 0.025
