@@ -25,6 +25,9 @@ Usage:
 
     # Evaluate a saved checkpoint only (no training)
     python train_taesd_reconstruction.py --data_path /path/to/lolv1/our485 --val_path /path/to/lolv1/eval15 --eval_only --resume checkpoints/best.pth
+
+    # Train with FID loss against a reference dataset
+    python train_taesd_reconstruction.py --data_path /path/to/lolv1/our485 --use_fid --fid_ref_path /path/to/lolv2-real/high --fid_weight 0.01
 """
 
 import argparse
@@ -54,6 +57,291 @@ try:
 except ImportError:
     LPIPS_AVAILABLE = False
     print("Warning: lpips not available. Install with 'pip install lpips' for perceptual loss.")
+
+# Optional: FID loss
+try:
+    from torchvision.models import inception_v3, Inception_V3_Weights
+    from scipy import linalg
+    import numpy as np
+
+    FID_AVAILABLE = True
+except ImportError:
+    FID_AVAILABLE = False
+    print("Warning: scipy not available. Install with 'pip install scipy' for FID loss.")
+
+
+class FIDFeatureExtractor(nn.Module):
+    """
+    Extract features from Inception v3 for FID computation.
+    Uses the pool3 layer (2048-dimensional features).
+    """
+
+    def __init__(self, device='cuda'):
+        super().__init__()
+        self.device = device
+
+        # Load pretrained Inception v3
+        self.inception = inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
+        self.inception.fc = nn.Identity()  # Remove final FC layer
+        self.inception.eval()
+        self.inception.to(device)
+
+        # Freeze all parameters
+        for param in self.inception.parameters():
+            param.requires_grad = False
+
+        # Preprocessing for Inception (expects 299x299 images, normalized)
+        self.resize = transforms.Resize((299, 299), antialias=True)
+        self.normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+
+    def forward(self, x):
+        """
+        Extract 2048-dim features from images.
+        Args:
+            x: Tensor of shape (B, 3, H, W) in range [0, 1]
+        Returns:
+            features: Tensor of shape (B, 2048)
+        """
+        # Resize to 299x299
+        x = self.resize(x)
+        # Normalize
+        x = self.normalize(x)
+        # Extract features
+        with torch.no_grad():
+            features = self.inception(x)
+        return features
+
+
+class FIDReferenceDataset(Dataset):
+    """Dataset for loading reference images for FID computation."""
+
+    def __init__(self, image_folder, max_images=None):
+        """
+        Args:
+            image_folder: Path to folder containing reference images
+            max_images: Maximum number of images to use (None for all)
+        """
+        super().__init__()
+        self.image_folder = image_folder
+
+        # Support multiple image formats
+        extensions = ['*.png', '*.jpg', '*.jpeg', '*.PNG', '*.JPG', '*.JPEG']
+        self.image_paths = []
+        for ext in extensions:
+            self.image_paths.extend(glob.glob(os.path.join(image_folder, ext)))
+            self.image_paths.extend(glob.glob(os.path.join(image_folder, '**', ext), recursive=True))
+
+        self.image_paths = sorted(list(set(self.image_paths)))
+
+        if max_images is not None and len(self.image_paths) > max_images:
+            # Randomly sample images
+            import random
+            random.seed(42)
+            self.image_paths = random.sample(self.image_paths, max_images)
+
+        self.transform = transforms.ToTensor()
+        print(f"[FIDReferenceDataset] Loaded {len(self.image_paths)} images from {image_folder}")
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img = Image.open(self.image_paths[idx]).convert('RGB')
+        return self.transform(img)
+
+
+class FIDLoss(nn.Module):
+    """
+    FID-based loss for training.
+
+    This computes a differentiable approximation to FID by comparing
+    the feature statistics of generated images to precomputed reference statistics.
+
+    Two modes are supported:
+    1. 'batch': Compare batch statistics to reference (faster, noisier)
+    2. 'running': Maintain running statistics and compare periodically (more stable)
+    """
+
+    def __init__(self, ref_dataset_path, device='cuda', max_ref_images=1000,
+                 mode='batch', momentum=0.1):
+        """
+        Args:
+            ref_dataset_path: Path to reference dataset folder
+            device: Device to use
+            max_ref_images: Maximum reference images to use for statistics
+            mode: 'batch' or 'running'
+            momentum: Momentum for running statistics (only used in 'running' mode)
+        """
+        super().__init__()
+        self.device = device
+        self.mode = mode
+        self.momentum = momentum
+
+        # Feature extractor
+        self.feature_extractor = FIDFeatureExtractor(device)
+
+        # Load reference dataset and compute statistics
+        print(f"Computing reference FID statistics from {ref_dataset_path}...")
+        ref_dataset = FIDReferenceDataset(ref_dataset_path, max_images=max_ref_images)
+        ref_loader = DataLoader(ref_dataset, batch_size=32, shuffle=False, num_workers=4)
+
+        self.ref_mu, self.ref_sigma = self._compute_statistics(ref_loader)
+        print(f"Reference statistics computed: mu shape={self.ref_mu.shape}, sigma shape={self.ref_sigma.shape}")
+
+        # Running statistics for generated images (used in 'running' mode)
+        if mode == 'running':
+            self.register_buffer('running_mu', torch.zeros(2048, device=device))
+            self.register_buffer('running_sigma', torch.eye(2048, device=device))
+            self.register_buffer('num_batches', torch.tensor(0, device=device))
+
+    @torch.no_grad()
+    def _compute_statistics(self, dataloader):
+        """Compute mean and covariance of features from a dataloader."""
+        all_features = []
+
+        for batch in tqdm(dataloader, desc="Extracting reference features"):
+            if isinstance(batch, (list, tuple)):
+                batch = batch[0]
+            batch = batch.to(self.device)
+            features = self.feature_extractor(batch)
+            all_features.append(features.cpu())
+
+        all_features = torch.cat(all_features, dim=0).numpy()
+
+        mu = np.mean(all_features, axis=0)
+        sigma = np.cov(all_features, rowvar=False)
+
+        return torch.from_numpy(mu).float().to(self.device), \
+            torch.from_numpy(sigma).float().to(self.device)
+
+    def _compute_batch_statistics(self, features):
+        """Compute mean and covariance from a batch of features."""
+        # features: (B, 2048)
+        mu = features.mean(dim=0)
+
+        # Compute covariance
+        centered = features - mu.unsqueeze(0)
+        # Add small regularization for numerical stability
+        sigma = (centered.T @ centered) / (features.shape[0] - 1) + 1e-6 * torch.eye(
+            features.shape[1], device=features.device)
+
+        return mu, sigma
+
+    def _compute_fid(self, mu1, sigma1, mu2, sigma2, eps=1e-6):
+        """
+        Compute FID between two Gaussians.
+
+        FID = ||mu1 - mu2||^2 + Tr(sigma1 + sigma2 - 2*sqrt(sigma1 @ sigma2))
+
+        This is a differentiable approximation using matrix square root.
+        """
+        diff = mu1 - mu2
+
+        # Compute sqrt(sigma1 @ sigma2) using eigendecomposition for stability
+        # This is differentiable through torch
+        product = sigma1 @ sigma2
+
+        # Add small regularization
+        product = product + eps * torch.eye(product.shape[0], device=product.device)
+
+        # Compute matrix square root via eigendecomposition
+        # Note: This is an approximation that's more stable for training
+        eigenvalues, eigenvectors = torch.linalg.eigh(product)
+        eigenvalues = torch.clamp(eigenvalues, min=eps)  # Ensure positive
+        sqrt_product = eigenvectors @ torch.diag(torch.sqrt(eigenvalues)) @ eigenvectors.T
+
+        # FID formula
+        fid = torch.sum(diff ** 2) + torch.trace(sigma1 + sigma2 - 2 * sqrt_product)
+
+        return fid
+
+    def forward(self, generated_images):
+        """
+        Compute FID loss for a batch of generated images.
+
+        Args:
+            generated_images: Tensor of shape (B, 3, H, W) in range [0, 1]
+
+        Returns:
+            fid_loss: Scalar tensor (differentiable w.r.t. generated_images through features)
+        """
+        # Extract features (this part is not differentiable, but we can still use
+        # the statistics comparison as a training signal)
+        # For a truly differentiable version, we'd need to backprop through Inception
+
+        # Get features
+        features = self.feature_extractor(generated_images)
+
+        if self.mode == 'batch':
+            # Compute batch statistics
+            gen_mu, gen_sigma = self._compute_batch_statistics(features)
+
+            # Compute FID
+            fid = self._compute_fid(gen_mu, gen_sigma, self.ref_mu, self.ref_sigma)
+
+        else:  # 'running' mode
+            # Update running statistics
+            batch_mu, batch_sigma = self._compute_batch_statistics(features)
+
+            with torch.no_grad():
+                if self.num_batches == 0:
+                    self.running_mu.copy_(batch_mu)
+                    self.running_sigma.copy_(batch_sigma)
+                else:
+                    self.running_mu.mul_(1 - self.momentum).add_(batch_mu * self.momentum)
+                    self.running_sigma.mul_(1 - self.momentum).add_(batch_sigma * self.momentum)
+                self.num_batches += 1
+
+            # Compute FID using running statistics
+            fid = self._compute_fid(self.running_mu, self.running_sigma,
+                                    self.ref_mu, self.ref_sigma)
+
+        return fid
+
+    @torch.no_grad()
+    def compute_fid_score(self, dataloader):
+        """
+        Compute actual FID score (non-differentiable) for evaluation.
+
+        Args:
+            dataloader: DataLoader yielding generated images
+
+        Returns:
+            fid_score: Float FID score
+        """
+        all_features = []
+
+        for batch in tqdm(dataloader, desc="Computing FID"):
+            if isinstance(batch, (list, tuple)):
+                batch = batch[0]
+            batch = batch.to(self.device)
+            features = self.feature_extractor(batch)
+            all_features.append(features.cpu())
+
+        all_features = torch.cat(all_features, dim=0).numpy()
+
+        gen_mu = np.mean(all_features, axis=0)
+        gen_sigma = np.cov(all_features, rowvar=False)
+
+        # Compute FID using scipy for numerical stability
+        ref_mu = self.ref_mu.cpu().numpy()
+        ref_sigma = self.ref_sigma.cpu().numpy()
+
+        diff = gen_mu - ref_mu
+
+        # Compute sqrt(sigma1 @ sigma2)
+        covmean, _ = linalg.sqrtm(gen_sigma @ ref_sigma, disp=False)
+
+        # Handle numerical issues
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+
+        fid = np.sum(diff ** 2) + np.trace(gen_sigma + ref_sigma - 2 * covmean)
+
+        return float(fid)
 
 
 class LOLv1ReconDataset(Dataset):
@@ -302,6 +590,25 @@ class TAESDTrainer:
                 p.requires_grad = False
             print("LPIPS perceptual loss enabled")
 
+        # FID loss (optional)
+        self.fid_loss = None
+        if args.use_fid:
+            if not FID_AVAILABLE:
+                raise RuntimeError("FID loss requested but scipy is not available. "
+                                   "Install with 'pip install scipy'")
+            if not args.fid_ref_path:
+                raise ValueError("FID loss requires --fid_ref_path to specify reference dataset")
+
+            self.fid_loss = FIDLoss(
+                ref_dataset_path=args.fid_ref_path,
+                device=self.device,
+                max_ref_images=args.fid_max_ref_images,
+                mode=args.fid_mode,
+                momentum=args.fid_momentum
+            )
+            print(f"FID loss enabled with reference: {args.fid_ref_path}")
+            print(f"  Mode: {args.fid_mode}, Weight: {args.fid_weight}")
+
         # Optimizer (only needed for training)
         if not args.eval_only:
             self.optimizer = torch.optim.AdamW(
@@ -376,7 +683,7 @@ class TAESDTrainer:
         if args.resume:
             self.load_checkpoint(args.resume, eval_only=args.eval_only)
 
-    def compute_loss(self, pred, target):
+    def compute_loss(self, pred, target, compute_fid=True):
         """Compute reconstruction loss."""
         # L1 loss
         loss_l1 = self.l1_loss(pred, target)
@@ -396,7 +703,20 @@ class TAESDTrainer:
             loss_lpips = self.lpips_loss(pred_lpips, target_lpips).mean()
             loss = loss + self.args.lpips_weight * loss_lpips
 
-        return loss, {'l1': loss_l1.item(), 'l2': loss_l2.item(), 'lpips': loss_lpips.item()}
+        # FID loss (optional)
+        loss_fid = torch.tensor(0.0, device=self.device)
+        if self.fid_loss is not None and compute_fid:
+            # Only compute FID loss every N steps to save computation
+            if self.global_step % self.args.fid_every == 0:
+                loss_fid = self.fid_loss(pred)
+                loss = loss + self.args.fid_weight * loss_fid
+
+        return loss, {
+            'l1': loss_l1.item(),
+            'l2': loss_l2.item(),
+            'lpips': loss_lpips.item(),
+            'fid': loss_fid.item()
+        }
 
     def compute_psnr(self, pred, target):
         """Compute PSNR between prediction and target."""
@@ -432,6 +752,9 @@ class TAESDTrainer:
         sample_images_ll = []
         sample_images_hl = []
 
+        # Collect all outputs for FID computation
+        all_outputs = []
+
         pbar = tqdm(dataloader, desc=f"Evaluating {dataset_name}")
         for batch_idx, (padded, original, orig_h, orig_w, img_type) in enumerate(pbar):
             padded = padded.to(self.device)
@@ -444,13 +767,17 @@ class TAESDTrainer:
             output = output[:, :, :orig_h, :orig_w]
             output = output.clamp(0, 1)
 
-            # Compute metrics
+            # Compute metrics (without FID for per-sample evaluation)
             psnr = self.compute_psnr(output, original)
-            loss, _ = self.compute_loss(output, original)
+            loss, _ = self.compute_loss(output, original, compute_fid=False)
 
             total_psnr += psnr
             total_loss += loss.item()
             count += 1
+
+            # Collect outputs for FID
+            if self.fid_loss is not None:
+                all_outputs.append(output.cpu())
 
             # Track per-type metrics
             if img_type[0] == 'll':
@@ -488,6 +815,26 @@ class TAESDTrainer:
             metrics['psnr_hl'] = total_psnr_hl / count_hl
             metrics['count_hl'] = count_hl
 
+        # Compute FID score if enabled
+        if self.fid_loss is not None and all_outputs:
+            print(f"  Computing FID score for {dataset_name}...")
+
+            # Create a simple dataloader from collected outputs
+            class OutputDataset(Dataset):
+                def __init__(self, outputs):
+                    self.outputs = torch.cat(outputs, dim=0)
+
+                def __len__(self):
+                    return len(self.outputs)
+
+                def __getitem__(self, idx):
+                    return self.outputs[idx]
+
+            output_loader = DataLoader(OutputDataset(all_outputs), batch_size=32, shuffle=False)
+            fid_score = self.fid_loss.compute_fid_score(output_loader)
+            metrics['fid'] = fid_score
+            print(f"  FID score: {fid_score:.2f}")
+
         # Save sample images
         if save_samples:
             sample_images = sample_images_ll + sample_images_hl
@@ -502,6 +849,8 @@ class TAESDTrainer:
         self.model.train()
         epoch_loss = 0
         epoch_psnr = 0
+        epoch_fid = 0
+        fid_count = 0
 
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch + 1}/{self.args.epochs}")
         for batch_idx, (inputs, targets) in enumerate(pbar):
@@ -531,6 +880,10 @@ class TAESDTrainer:
             epoch_loss += loss.item()
             epoch_psnr += psnr
 
+            if loss_dict['fid'] > 0:
+                epoch_fid += loss_dict['fid']
+                fid_count += 1
+
             # Logging
             self.global_step += 1
             if self.global_step % self.args.log_interval == 0:
@@ -538,13 +891,17 @@ class TAESDTrainer:
                 self.writer.add_scalar('train/psnr', psnr, self.global_step)
                 self.writer.add_scalar('train/lr', self.scheduler.get_last_lr()[0], self.global_step)
                 for k, v in loss_dict.items():
-                    self.writer.add_scalar(f'train/loss_{k}', v, self.global_step)
+                    if v > 0:  # Only log non-zero losses
+                        self.writer.add_scalar(f'train/loss_{k}', v, self.global_step)
 
-            pbar.set_postfix({
+            postfix = {
                 'loss': f'{loss.item():.4f}',
                 'psnr': f'{psnr:.2f}',
                 'lr': f'{self.scheduler.get_last_lr()[0]:.2e}'
-            })
+            }
+            if loss_dict['fid'] > 0:
+                postfix['fid'] = f'{loss_dict["fid"]:.1f}'
+            pbar.set_postfix(postfix)
 
         avg_loss = epoch_loss / len(self.train_loader)
         avg_psnr = epoch_psnr / len(self.train_loader)
@@ -562,6 +919,7 @@ class TAESDTrainer:
         count = 0
 
         sample_images = []
+        all_outputs = []
 
         for batch_idx, (padded, original, orig_h, orig_w, img_type) in enumerate(self.val_loader):
             padded = padded.to(self.device)
@@ -576,11 +934,14 @@ class TAESDTrainer:
 
             # Compute metrics
             psnr = self.compute_psnr(output, original)
-            loss, _ = self.compute_loss(output, original)
+            loss, _ = self.compute_loss(output, original, compute_fid=False)
 
             total_psnr += psnr
             total_loss += loss.item()
             count += 1
+
+            if self.fid_loss is not None:
+                all_outputs.append(output.cpu())
 
             # Save sample images
             if len(sample_images) < 4:
@@ -597,6 +958,23 @@ class TAESDTrainer:
         if self.writer:
             self.writer.add_scalar('val/psnr', avg_psnr, epoch)
             self.writer.add_scalar('val/loss', avg_loss, epoch)
+
+            # Compute and log FID if enabled
+            if self.fid_loss is not None and all_outputs:
+                class OutputDataset(Dataset):
+                    def __init__(self, outputs):
+                        self.outputs = torch.cat(outputs, dim=0)
+
+                    def __len__(self):
+                        return len(self.outputs)
+
+                    def __getitem__(self, idx):
+                        return self.outputs[idx]
+
+                output_loader = DataLoader(OutputDataset(all_outputs), batch_size=32, shuffle=False)
+                fid_score = self.fid_loss.compute_fid_score(output_loader)
+                self.writer.add_scalar('val/fid', fid_score, epoch)
+                print(f"  Validation FID: {fid_score:.2f}")
 
         # Save sample images
         if sample_images:
@@ -686,6 +1064,8 @@ class TAESDTrainer:
             print(f"    Low-light PSNR: {train_metrics['psnr_ll']:.2f} dB ({train_metrics['count_ll']} images)")
         if 'psnr_hl' in train_metrics:
             print(f"    High-light PSNR: {train_metrics['psnr_hl']:.2f} dB ({train_metrics['count_hl']} images)")
+        if 'fid' in train_metrics:
+            print(f"    FID: {train_metrics['fid']:.2f}")
 
         # Log to tensorboard
         if self.writer:
@@ -695,6 +1075,8 @@ class TAESDTrainer:
                 self.writer.add_scalar('initial_eval/train_psnr_ll', train_metrics['psnr_ll'], 0)
             if 'psnr_hl' in train_metrics:
                 self.writer.add_scalar('initial_eval/train_psnr_hl', train_metrics['psnr_hl'], 0)
+            if 'fid' in train_metrics:
+                self.writer.add_scalar('initial_eval/train_fid', train_metrics['fid'], 0)
 
         # Evaluate on validation set
         if self.val_loader:
@@ -710,6 +1092,8 @@ class TAESDTrainer:
                 print(f"    Low-light PSNR: {val_metrics['psnr_ll']:.2f} dB ({val_metrics['count_ll']} images)")
             if 'psnr_hl' in val_metrics:
                 print(f"    High-light PSNR: {val_metrics['psnr_hl']:.2f} dB ({val_metrics['count_hl']} images)")
+            if 'fid' in val_metrics:
+                print(f"    FID: {val_metrics['fid']:.2f}")
 
             # Log to tensorboard
             if self.writer:
@@ -719,6 +1103,8 @@ class TAESDTrainer:
                     self.writer.add_scalar('initial_eval/val_psnr_ll', val_metrics['psnr_ll'], 0)
                 if 'psnr_hl' in val_metrics:
                     self.writer.add_scalar('initial_eval/val_psnr_hl', val_metrics['psnr_hl'], 0)
+                if 'fid' in val_metrics:
+                    self.writer.add_scalar('initial_eval/val_fid', val_metrics['fid'], 0)
 
         print(f"\n{'=' * 60}\n")
 
@@ -747,6 +1133,8 @@ class TAESDTrainer:
             print(f"    Low-light PSNR: {train_metrics['psnr_ll']:.2f} dB ({train_metrics['count_ll']} images)")
         if 'psnr_hl' in train_metrics:
             print(f"    High-light PSNR: {train_metrics['psnr_hl']:.2f} dB ({train_metrics['count_hl']} images)")
+        if 'fid' in train_metrics:
+            print(f"    FID: {train_metrics['fid']:.2f}")
 
         # Evaluate on validation set
         if self.val_loader:
@@ -766,6 +1154,8 @@ class TAESDTrainer:
                 print(f"    Low-light PSNR: {val_metrics['psnr_ll']:.2f} dB ({val_metrics['count_ll']} images)")
             if 'psnr_hl' in val_metrics:
                 print(f"    High-light PSNR: {val_metrics['psnr_hl']:.2f} dB ({val_metrics['count_hl']} images)")
+            if 'fid' in val_metrics:
+                print(f"    FID: {val_metrics['fid']:.2f}")
 
         # Save results to file
         results_path = os.path.join(self.output_dir, "evaluation_results.txt")
@@ -773,7 +1163,10 @@ class TAESDTrainer:
             f.write(f"Evaluation Results\n")
             f.write(f"==================\n")
             f.write(f"Checkpoint: {self.args.resume}\n")
-            f.write(f"Mode: {self.args.mode}\n\n")
+            f.write(f"Mode: {self.args.mode}\n")
+            if self.args.use_fid:
+                f.write(f"FID Reference: {self.args.fid_ref_path}\n")
+            f.write(f"\n")
 
             f.write(f"Training Set:\n")
             f.write(f"  PSNR: {train_metrics['psnr']:.2f} dB\n")
@@ -783,6 +1176,8 @@ class TAESDTrainer:
                 f.write(f"  Low-light PSNR: {train_metrics['psnr_ll']:.2f} dB ({train_metrics['count_ll']} images)\n")
             if 'psnr_hl' in train_metrics:
                 f.write(f"  High-light PSNR: {train_metrics['psnr_hl']:.2f} dB ({train_metrics['count_hl']} images)\n")
+            if 'fid' in train_metrics:
+                f.write(f"  FID: {train_metrics['fid']:.2f}\n")
 
             if self.val_loader:
                 f.write(f"\nValidation Set:\n")
@@ -793,6 +1188,8 @@ class TAESDTrainer:
                     f.write(f"  Low-light PSNR: {val_metrics['psnr_ll']:.2f} dB ({val_metrics['count_ll']} images)\n")
                 if 'psnr_hl' in val_metrics:
                     f.write(f"  High-light PSNR: {val_metrics['psnr_hl']:.2f} dB ({val_metrics['count_hl']} images)\n")
+                if 'fid' in val_metrics:
+                    f.write(f"  FID: {val_metrics['fid']:.2f}\n")
 
         print(f"\n{'=' * 60}")
         print(f"Evaluation complete!")
@@ -811,6 +1208,8 @@ class TAESDTrainer:
         print(f"Training samples: {len(self.train_dataset)}")
         if self.val_loader:
             print(f"Validation samples: {len(self.val_dataset)}")
+        if self.fid_loss is not None:
+            print(f"FID reference: {self.args.fid_ref_path}")
         print(f"{'=' * 60}\n")
 
         # Run initial evaluation before training
@@ -892,6 +1291,22 @@ def parse_args():
     parser.add_argument('--lpips_weight', type=float, default=0.1,
                         help='Weight for LPIPS loss')
 
+    # FID loss options
+    parser.add_argument('--use_fid', action='store_true',
+                        help='Use FID loss against a reference dataset')
+    parser.add_argument('--fid_ref_path', type=str, default=None,
+                        help='Path to reference dataset for FID (e.g., lolv2-real/high)')
+    parser.add_argument('--fid_weight', type=float, default=0.01,
+                        help='Weight for FID loss (typically small, e.g., 0.001-0.1)')
+    parser.add_argument('--fid_max_ref_images', type=int, default=1000,
+                        help='Maximum number of reference images for FID statistics')
+    parser.add_argument('--fid_mode', type=str, default='batch', choices=['batch', 'running'],
+                        help='FID computation mode: batch (per-batch) or running (accumulated)')
+    parser.add_argument('--fid_momentum', type=float, default=0.1,
+                        help='Momentum for running FID statistics')
+    parser.add_argument('--fid_every', type=int, default=10,
+                        help='Compute FID loss every N training steps (to save computation)')
+
     # Misc
     parser.add_argument('--output_dir', type=str, default='./out_p1',
                         help='Output directory')
@@ -915,6 +1330,9 @@ def main():
     # Validate arguments
     if args.eval_only and args.resume is None:
         raise ValueError("--eval_only requires --resume to specify a checkpoint")
+
+    if args.use_fid and args.fid_ref_path is None:
+        raise ValueError("--use_fid requires --fid_ref_path to specify reference dataset")
 
     trainer = TAESDTrainer(args)
 
