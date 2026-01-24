@@ -76,7 +76,7 @@ model_cfg:
 # Training
 # -------------------------------------------------
 train_cfg:
-  epochs: 20 #  !!!! MAKE SURE THIS MATCHES dataset_cfg.train_dataset.total_epochs
+  epochs: 250 #  !!!! MAKE SURE THIS MATCHES dataset_cfg.train_dataset.total_epochs
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
   weight_decay: 0.0
