@@ -21,6 +21,9 @@ Usage:
     # Use pretrained SD VAE from diffusers
     python enc_dec_reconstruction.py --config configs/llie/elir_train_llie_sid.yaml --use_pretrained sdxl-vae
 
+    # Test reconstruction on low quality images
+    python enc_dec_reconstruction.py --config configs/llie/elir_train_llie_sid.yaml --test_lq
+
     # Additional options
     python enc_dec_reconstruction.py --config configs/llie/elir_train_llie_sid.yaml --num_samples 5 --save_dir test_reconstruction
 """
@@ -52,6 +55,8 @@ def parse_args():
                         help='Use pretrained autoencoder from diffusers instead of config model. '
                              'Options: taesd (Tiny AE for SD), taesd3 (Tiny AE for SD3), '
                              'sdxl-vae (SDXL VAE), sd-vae (SD 1.5 VAE)')
+    parser.add_argument('--test_lq', action='store_true',
+                        help='Test reconstruction on low quality images instead of high quality')
     return parser.parse_args()
 
 
@@ -165,9 +170,9 @@ def load_pretrained_autoencoder(model_name, device):
     return PretrainedAutoencoder(model_name, device)
 
 
-def reconstruction(model, dataloader, num_samples, save_dir, device):
+def reconstruction(model, dataloader, num_samples, save_dir, device, test_lq=False):
     """
-    Test encoder/decoder reconstruction by passing HQ images through encoder → decoder.
+    Test encoder/decoder reconstruction by passing images through encoder → decoder.
 
     Args:
         model: ELIR model with encoder and decoder
@@ -175,6 +180,7 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
         num_samples: Number of samples to test
         save_dir: Directory to save results
         device: torch device
+        test_lq: If True, test reconstruction on LQ images instead of HQ
     """
     os.makedirs(save_dir, exist_ok=True)
 
@@ -182,8 +188,10 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
     if not hasattr(model, 'enc') or not hasattr(model, 'dec'):
         raise ValueError("Model does not have 'enc' (encoder) or 'dec' (decoder) attributes")
 
+    image_type = "LQ" if test_lq else "HQ"
+
     print(f"\n{'='*80}")
-    print("Encoder/Decoder Reconstruction Test")
+    print(f"Encoder/Decoder Reconstruction Test ({image_type} images)")
     print(f"{'='*80}")
     print(f"Testing {num_samples} samples...")
     print(f"Results will be saved to: {save_dir}")
@@ -205,8 +213,8 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
 
             # Get LQ and HQ images
             x_lq, x_hq = batch[0], batch[1]
+            x_lq = x_lq.to(device)
             x_hq = x_hq.to(device)
-            # x_lq = x_lq.to(device)
 
             batch_size = x_hq.shape[0]
 
@@ -214,15 +222,19 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
                 if sample_count >= num_samples:
                     break
 
-                # Get single image
-                hq_img = x_hq[i:i+1]  # [1, C, H, W]
-                # lq_img = x_lq[i:i+1]  # [1, C, H, W]
+                # Get single image - use LQ or HQ based on test_lq flag
+                if test_lq:
+                    input_img = x_lq[i:i+1]  # [1, C, H, W]
+                    gt_img = x_lq[i:i+1]  # Compare reconstruction to original LQ
+                else:
+                    input_img = x_hq[i:i+1]  # [1, C, H, W]
+                    gt_img = x_hq[i:i+1]  # Compare reconstruction to original HQ
 
                 print(f"\nSample {sample_count + 1}/{num_samples}")
-                print(f"  Input HQ shape: {hq_img.shape}")
+                print(f"  Input {image_type} shape: {input_img.shape}")
 
-                # Encode HQ image to latent space
-                latent = model.enc(hq_img)
+                # Encode image to latent space
+                latent = model.enc(input_img)
                 print(f"  Latent shape: {latent.shape}")
                 print(f"  Latent stats - min: {latent.min():.4f}, max: {latent.max():.4f}, mean: {latent.mean():.4f}, std: {latent.std():.4f}")
 
@@ -231,15 +243,15 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
                 print(f"  Reconstructed shape: {reconstructed.shape}")
 
                 # Handle size mismatch if any
-                if reconstructed.shape != hq_img.shape:
-                    print(f"  Warning: Shape mismatch! HQ: {hq_img.shape}, Reconstructed: {reconstructed.shape}")
+                if reconstructed.shape != gt_img.shape:
+                    print(f"  Warning: Shape mismatch! GT: {gt_img.shape}, Reconstructed: {reconstructed.shape}")
                     raise ValueError("Shape mismatch!")
 
                 # Clamp to valid range
                 reconstructed = reconstructed.clamp(0, 1)
 
                 # Compute PSNR
-                psnr_val = psnr_metric(reconstructed, hq_img).item()
+                psnr_val = psnr_metric(reconstructed, gt_img).item()
                 psnr_values.append(psnr_val)
                 print(f"  PSNR: {psnr_val:.2f} dB")
 
@@ -248,16 +260,16 @@ def reconstruction(model, dataloader, num_samples, save_dir, device):
                 os.makedirs(sample_dir, exist_ok=True)
 
                 # Save individual images
-                save_image(hq_img, os.path.join(sample_dir, "ground_truth_hq.png"))
+                save_image(gt_img, os.path.join(sample_dir, f"original_{image_type.lower()}.png"))
                 save_image(reconstructed, os.path.join(sample_dir, "reconstructed.png"))
                 save_image(latent[0, 0:3].unsqueeze(0), os.path.join(sample_dir, "latent_vis.png"), normalize=True)
 
                 # Create side-by-side comparison
-                comparison = torch.cat([hq_img, reconstructed, (hq_img - reconstructed).abs()], dim=3)
-                save_image(comparison, os.path.join(sample_dir, "comparison_hq_recon_diff.png"))
+                comparison = torch.cat([gt_img, reconstructed, (gt_img - reconstructed).abs()], dim=3)
+                save_image(comparison, os.path.join(sample_dir, f"comparison_{image_type.lower()}_recon_diff.png"))
 
                 # Save difference map with amplification for visibility
-                diff = (hq_img - reconstructed).abs()
+                diff = (gt_img - reconstructed).abs()
                 diff_amplified = (diff * 5).clamp(0, 1)  # Amplify difference for visibility
                 save_image(diff_amplified, os.path.join(sample_dir, "difference_amplified_5x.png"))
 
@@ -351,10 +363,12 @@ def main():
 
     dataloader = get_loader(val_dataset_cfg)
 
-    # Update save_dir to include model type
+    # Update save_dir to include model type and image type
     save_dir = args.save_dir
     if args.use_pretrained:
         save_dir = f"{args.save_dir}_{args.use_pretrained}"
+    if args.test_lq:
+        save_dir = f"{save_dir}_lq"
 
     # Run reconstruction test
     results = reconstruction(
@@ -362,7 +376,8 @@ def main():
         dataloader=dataloader,
         num_samples=args.num_samples,
         save_dir=save_dir,
-        device=device
+        device=device,
+        test_lq=args.test_lq
     )
 
     return results
