@@ -14,7 +14,6 @@ import math
 from PIL import Image
 import numpy as np
 
-from patch_saver import PatchSaver
 
 
 class IRSetup(L.LightningModule):
@@ -45,7 +44,6 @@ class IRSetup(L.LightningModule):
             self.samples_dir = os.path.join(run_dir, "samples")
             os.makedirs(self.samples_dir, exist_ok=True)  # run folder
             self.samples = []
-        self.patch_saver = PatchSaver()
 
         # For MLflow image logging per validation dataset
         self.val_dataset_names = val_dataset_names or []
@@ -104,6 +102,11 @@ class IRSetup(L.LightningModule):
         for name, value in loss_dict.items():
             if name != 'loss_total':
                 self.log(f"train_{name}", value, on_epoch=True, prog_bar=False, logger=True)
+
+        # Log training images periodically
+        log_every = self.eval_cfg.get("log_train_images_every", 100)
+        if self.global_step % log_every == 0:
+            self._log_training_images(x_lq, x_hq, self.global_step)
 
         return loss_dict['loss_total']
 
@@ -246,6 +249,33 @@ class IRSetup(L.LightningModule):
                         )
                 except Exception as e:
                     print(f"Warning: Could not log image to MLflow: {e}")
+
+    def _log_training_images(self, x_lq, x_hq, step):
+        """Log training samples. Input/GT saved only once, predictions saved periodically."""
+        if self.image_logging_mode == "none":
+            return
+
+        if self.image_logging_mode == "local" and self.samples_dir is None:
+            return
+
+        # Run inference to get prediction
+        with torch.no_grad():
+            y_hat = self.infer(x_lq[:1])
+
+        x_lq_cpu = x_lq[0:1].detach().cpu()
+        x_hq_cpu = x_hq[0:1].detach().cpu()
+        y_hat_cpu = y_hat[0:1].detach().cpu()
+
+        dataset_name = "train"
+
+        # Save input and ground truth only once
+        if "train" not in self.logged_reference_images:
+            self._save_single_image(x_lq_cpu, dataset_name, "input")
+            self._save_single_image(x_hq_cpu, dataset_name, "ground_truth")
+            self.logged_reference_images.add("train")
+
+        # Save prediction at this step
+        self._save_single_image(y_hat_cpu, dataset_name, f"pred_step_{step}")
 
 
     def on_save_checkpoint(self, checkpoint):
