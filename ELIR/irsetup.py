@@ -20,7 +20,7 @@ from patch_saver import PatchSaver
 class IRSetup(L.LightningModule):
     def __init__(self, model, fm_cfg={}, optimizer=None, scheduler=None, tmodel=None,
                  ema_decay=None, eval_cfg=None, run_dir=None, save_images=True,
-                 val_dataset_names=None, image_logging_mode="local"):
+                 val_dataset_names=None, image_logging_mode="local", skip_saving_model=True):
         super().__init__()
         self.model = model
         self.fm_cfg = fm_cfg
@@ -54,6 +54,7 @@ class IRSetup(L.LightningModule):
         # Image logging mode: "none", "local" (default), or "mlflow"
         self.image_logging_mode = image_logging_mode
         self.logged_reference_images = set()  # Track which dataloaders have logged input/gt
+        self.skip_saving_model = skip_saving_model
 
     def optimizer_step(
         self,
@@ -248,6 +249,9 @@ class IRSetup(L.LightningModule):
 
 
     def on_save_checkpoint(self, checkpoint):
+        if self.skip_saving_model:
+            return checkpoint
+
         if self.ema:
             if hasattr(self.ema.model,"fmir"):
                 checkpoint['state_dict_fmir'] = self.ema.model.fmir.state_dict()
