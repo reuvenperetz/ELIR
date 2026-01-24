@@ -1,0 +1,3 @@
+name: rrdbnet
+params: {c_inout: 16, c_hid: 96, n_rrdb: 3, overparametrization: True}
+trainable: True
