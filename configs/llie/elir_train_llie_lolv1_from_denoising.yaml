@@ -76,14 +76,14 @@ model_cfg:
 # Training
 # -------------------------------------------------
 train_cfg:
-  epochs: 250 #  !!!! MAKE SURE THIS MATCHES dataset_cfg.train_dataset.total_epochs
+  epochs: 5 #  !!!! MAKE SURE THIS MATCHES dataset_cfg.train_dataset.total_epochs
   optimizer: !name:torch.optim.AdamW
   lr: 0.0002
   weight_decay: 0.0
   optimizer_params: {}
   ema_decay: 0.999
   max_steps: -1 # run only several steps
-  check_val_every_n_epoch: 3
+  check_val_every_n_epoch: 1
   num_sanity_val_steps: 2
   wandb: False
   mlflow: True
@@ -94,7 +94,7 @@ train_cfg:
   #   "mlflow" - save locally AND log to MLflow artifacts
   # Note: input/ground_truth saved once (first epoch), predictions saved every epoch
   image_logging_mode: local
-  save_every: 5
+  save_every: 1
 
 
 
@@ -102,4 +102,4 @@ train_cfg:
 # Evaluation
 # -------------------------------------------------
 eval_cfg:
-  metrics: ["lpips","psnr", "fid", "ssim", "musiq"]
+  metrics: ["lpips","psnr", "fid", "ssim"]
