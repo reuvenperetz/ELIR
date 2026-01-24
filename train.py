@@ -163,7 +163,7 @@ def run_train(conf):
     # train_setup.ema.model.collapse()
     state_dict = train_setup.ema.model.state_dict()
     state_dict = adjust_weights(state_dict)
-    if train_cfg.get("skip_saving_model", True):
+    if not train_cfg.get("skip_saving_model", True):
         torch.save(state_dict, os.path.join(run_dir, "elir.pth"))
     if train_cfg.get("mlflow", False):
         mlflow_logger.finalize("success")
