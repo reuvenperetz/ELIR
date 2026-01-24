@@ -1282,9 +1282,9 @@ def parse_args():
                         help='Gradient clipping value (0 to disable)')
 
     # Loss weights
-    parser.add_argument('--l1_weight', type=float, default=1.0,
+    parser.add_argument('--l1_weight', type=float, default=0.0,
                         help='Weight for L1 loss')
-    parser.add_argument('--l2_weight', type=float, default=0.0,
+    parser.add_argument('--l2_weight', type=float, default=1.0,
                         help='Weight for L2/MSE loss')
     parser.add_argument('--use_lpips', action='store_true',
                         help='Use LPIPS perceptual loss')
