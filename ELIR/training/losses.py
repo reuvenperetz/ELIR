@@ -39,7 +39,9 @@ def fm_loss(model, x_hq, x_lq, fm_cfg):
     v = model.fmir(Xt, pos_emb(t, t_dim))
 
     loss = F.mse_loss(u, v)
-    return loss
+    return {
+        'loss_total': loss
+    }
 
 
 def cfm_loss(model, x_hq, x_lq, fm_cfg):
