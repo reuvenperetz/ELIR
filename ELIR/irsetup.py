@@ -104,7 +104,7 @@ class IRSetup(L.LightningModule):
                 self.log(f"train_{name}", value, on_epoch=True, prog_bar=False, logger=True)
 
         # Log training images periodically
-        log_every = self.eval_cfg.get("log_train_images_every", 100)
+        log_every = self.eval_cfg.get("log_train_images_every", 50)
         if self.global_step % log_every == 0:
             self._log_training_images(x_lq, x_hq, self.global_step)
 
