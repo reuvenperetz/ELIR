@@ -44,6 +44,9 @@ def get_loader(ds_params):
     elif ds_name == "LOLv2Synthetic":
         from ELIR.datasets.lolv2 import LOLv2Synthetic
         dl = LOLv2Synthetic().create_loaders(ds_params)
+    elif ds_name == "LOLv1ReDDiT":
+        from ELIR.datasets.lolv1reddit import LOLv1ReDDiT
+        dl = LOLv1ReDDiT().create_loaders(ds_params)
     else:
         raise Exception("Dataset is unknown!")
 

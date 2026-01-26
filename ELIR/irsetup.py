@@ -89,7 +89,12 @@ class IRSetup(L.LightningModule):
                 dataset.set_epoch(self.current_epoch)
 
     def training_step(self, batch, batch_idx):
-        x_lq, x_hq = batch[0], batch[1]
+        if isinstance(batch, dict): # reddit lolv1 testing
+            x_lq = batch['reflectance']
+            x_hq = batch['hq']
+        else:
+            x_lq, x_hq = batch[0], batch[1]
+
         # Print input shape for each rank (useful for DDP debugging)
         rank = self.global_rank if hasattr(self, 'global_rank') else 0
         print(f"[Rank {rank}] Train batch {batch_idx} - x_lq: {x_lq.shape}, x_hq: {x_hq.shape}")
@@ -131,6 +136,10 @@ class IRSetup(L.LightningModule):
         if len(batch) == 3:
             x_lq, y, orig_dims = batch
             # orig_dims is (B, 2) tensor with [orig_h, orig_w] for each sample
+        if isinstance(batch, dict): # reddit lolv1 testing
+            x_lq = batch['reflectance']
+            y = batch['hq']
+            orig_dims = batch['orig_dims'] if 'orig_dims' in batch else None
         else:
             x_lq, y = batch
             orig_dims = None
