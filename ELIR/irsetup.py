@@ -136,7 +136,7 @@ class IRSetup(L.LightningModule):
         if len(batch) == 3:
             x_lq, y, orig_dims = batch
             # orig_dims is (B, 2) tensor with [orig_h, orig_w] for each sample
-        if isinstance(batch, dict): # reddit lolv1 testing
+        elif isinstance(batch, dict): # reddit lolv1 testing
             x_lq = batch['reflectance']
             y = batch['hq']
             orig_dims = batch['orig_dims'] if 'orig_dims' in batch else None
