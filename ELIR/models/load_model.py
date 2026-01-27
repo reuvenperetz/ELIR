@@ -25,7 +25,7 @@ def get_model(cfg):
         model = RRDBNet(**model_params)
         if model_path is not None:
             rrdbnet_ckpt = torch.load(model_path)
-            model.load_state_dict(rrdbnet_ckpt['rrdb_state_dict'])
+            model.load_state_dict(rrdbnet_ckpt['rrdb_state_dict'], map_location=torch.device('cpu'))
         else:
             model.load_weights(model_path)
     elif model_name == "tiny_enc":
@@ -34,7 +34,7 @@ def get_model(cfg):
         from ELIR.models.taesd import TAESD
         model = TAESD()
         if model_path is not None:
-            encdec_ckpt = torch.load(model_path)
+            encdec_ckpt = torch.load(model_path, map_location=torch.device('cpu'))
             model.load_state_dict(encdec_ckpt['model_state_dict'])
         else:
             model.load_state_dict(pretrained.state_dict())
@@ -46,7 +46,7 @@ def get_model(cfg):
         model = TAESD()
 
         if model_path is not None:
-            encdec_ckpt = torch.load(model_path)
+            encdec_ckpt = torch.load(model_path, map_location=torch.device('cpu'))
             model.load_state_dict(encdec_ckpt['model_state_dict'])
         else:
             model.load_state_dict(pretrained.state_dict())
@@ -60,7 +60,7 @@ def get_model(cfg):
 
         if model_path is not None:
             encdec_ckpt = torch.load(model_path)
-            model.load_state_dict(encdec_ckpt['model_state_dict'])
+            model.load_state_dict(encdec_ckpt['model_state_dict'], map_location=torch.device('cpu'))
         else:
             model.load_state_dict(pretrained.state_dict())
 
