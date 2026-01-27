@@ -241,6 +241,7 @@ def l2_cfm_mse_loss(model, x_hq, x_lq, fm_cfg, tmodel):
     K = fm_cfg.get("k_steps")
     dt = fm_cfg.get("dt", 0.05)
     beta = fm_cfg.get("beta", 0.001)
+    gamma = fm_cfg.get("gamma", 0.1)
 
     # L2 loss (latent space MMSE)
     with torch.no_grad():
@@ -287,7 +288,7 @@ def l2_cfm_mse_loss(model, x_hq, x_lq, fm_cfg, tmodel):
     loss_pixel_space_mse = F.mse_loss(x_hq, x_hq_hat)
 
     # Weighted total loss
-    total_loss = loss_latent_mse + loss_flow + beta * loss_pixel_space_mse
+    total_loss = gamma * loss_latent_mse + loss_flow + beta * loss_pixel_space_mse
 
     return {
         'loss_total': total_loss,
