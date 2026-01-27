@@ -241,7 +241,7 @@ def l2_cfm_mse_loss(model, x_hq, x_lq, fm_cfg, tmodel):
     K = fm_cfg.get("k_steps")
     dt = fm_cfg.get("dt", 0.05)
     beta = fm_cfg.get("beta", 0.001)
-    gamma = fm_cfg.get("gamma", 0.1)
+    gamma = fm_cfg.get("gamma", 1.0)
 
     # L2 loss (latent space MMSE)
     with torch.no_grad():
